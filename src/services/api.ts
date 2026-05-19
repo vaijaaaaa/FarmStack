@@ -49,8 +49,19 @@ export const supplierApi = {
 
 export const productApi = {
   list: () => request<Product[]>('/api/products'),
+  listPaginated: (page: number = 1, limit: number = 10, search: string = '', searchBy: string = 'name') =>
+    request<{ data: Product[]; total: number; page: number; limit: number; totalPages: number }>(
+      `/api/products?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}&searchBy=${searchBy}`,
+    ),
   create: (payload: Partial<Product>) =>
     request<Product>('/api/products', { method: 'POST', body: JSON.stringify(payload) }),
+  update: (id: string, payload: Partial<Product>) =>
+    request<Product>('/api/products', { method: 'PUT', body: JSON.stringify({ id, ...payload }) }),
+  bulkUpload: (products: any[]) =>
+    request<{ success: number; failed: number; errors: any[]; created: any[] }>(
+      '/api/products/bulk',
+      { method: 'POST', body: JSON.stringify({ products }) },
+    ),
 }
 
 export const productTypeApi = {
