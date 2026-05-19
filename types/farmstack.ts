@@ -26,7 +26,9 @@ export interface Supplier extends TallyMasterFields {
   address: string
   kannada_address: string
   state?: string
+  country?: string
   gstin: string
+  place_of_supply?: string
   tally_ledger_name: string
 }
 

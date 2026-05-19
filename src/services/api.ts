@@ -21,8 +21,19 @@ export const customerApi = {
 
 export const supplierApi = {
   list: () => request<Supplier[]>('/api/suppliers'),
+  listPaginated: (page: number = 1, limit: number = 10, search: string = '', searchBy: string = 'name') =>
+    request<{ data: Supplier[]; total: number; page: number; limit: number; totalPages: number }>(
+      `/api/suppliers?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}&searchBy=${searchBy}`,
+    ),
   create: (payload: Partial<Supplier>) =>
     request<Supplier>('/api/suppliers', { method: 'POST', body: JSON.stringify(payload) }),
+  update: (id: string, payload: Partial<Supplier>) =>
+    request<Supplier>('/api/suppliers', { method: 'PUT', body: JSON.stringify({ id, ...payload }) }),
+  bulkUpload: (suppliers: any[]) =>
+    request<{ success: number; failed: number; errors: any[]; created: any[] }>(
+      '/api/suppliers/bulk',
+      { method: 'POST', body: JSON.stringify({ suppliers }) },
+    ),
 }
 
 export const productApi = {

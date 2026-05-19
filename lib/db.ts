@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS suppliers (
   address TEXT DEFAULT '',
   kannada_address TEXT DEFAULT '',
   state TEXT DEFAULT '',
+  country TEXT DEFAULT '',
   gstin TEXT DEFAULT '',
+  place_of_supply TEXT DEFAULT '',
   tally_ledger_name TEXT DEFAULT '',
   created_at TEXT NOT NULL
 );
@@ -175,6 +177,8 @@ function applySchema(db: any): void {
     for (const [col, def] of tallyColumns) ensureColumn(db, table, col, def)
   }
   ensureColumn(db, 'sales_items', 'type', "TEXT DEFAULT ''")
+  ensureColumn(db, 'suppliers', 'country', "TEXT DEFAULT ''")
+  ensureColumn(db, 'suppliers', 'place_of_supply', "TEXT DEFAULT ''")
   const masterTallyColumns: Array<[string, string]> = [
     ['tally_sync_status', "TEXT DEFAULT 'not_synced'"],
     ['tally_response', 'TEXT'],
