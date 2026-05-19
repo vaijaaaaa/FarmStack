@@ -1,0 +1,6 @@
+Product Name,Quantity,Buying Price,Date,Expiry Date,Type
+Wheat,100,500,2026-05-14,2026-12-31,organic
+Rice,50,800,2026-05-14,2027-05-14,conventional
+Corn,200,300,2026-05-14,2026-10-31,hybrid
+Barley,150,450,2026-05-14,2026-09-30,organic
+Soybeans,300,600,2026-05-14,2027-01-15,conventional
