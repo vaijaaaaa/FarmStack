@@ -93,6 +93,7 @@ export default function SupplierHistoryPage({
       <div className="flex gap-2">
         <button
           onClick={() => onEditSupplier(supplier)}
+          data-kbd-row-action
           className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded transition-colors"
           title="Edit"
         >

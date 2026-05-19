@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { tallyApi, invoiceApi, type TallyEntityType } from '@/src/services/api'
 
@@ -40,6 +40,16 @@ export default function TallyStatusCell({
   const [localMsg, setLocalMsg] = useState(response || '')
   const [editing, setEditing] = useState(false)
   const [dateVal, setDateVal] = useState('')
+
+  // DataTable reuses row component instances by position, so when the
+  // underlying row changes (reorder, refresh, pagination) the props change
+  // but this instance persists. Keep local state in sync with the props so
+  // the cell always reflects the current row's real Tally status.
+  useEffect(() => {
+    setLocalStatus(status)
+    setLocalMsg(response || '')
+    setEditing(false)
+  }, [invoiceId, status, response])
 
   const isVoucher = type === 'purchase' || type === 'sales'
   const canRetry = localStatus !== 'synced' && localStatus !== 'pending'

@@ -5,6 +5,7 @@ import { Language, UserRole } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import FormKeyboardNav from './components/FormKeyboardNav'
 import Dashboard from './modules/Dashboard'
 import CustomersModule from './modules/CustomersModule'
 import SuppliersModule from './modules/SuppliersModule'
@@ -95,6 +96,7 @@ export default function AppLayout() {
 
   return (
     <div className="flex h-screen bg-white">
+      <FormKeyboardNav />
       <Sidebar currentPage={currentPage} onPageChange={handlePageChange} language={language} role={role} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header pageTitle={getPageTitle()} language={language} onLanguageChange={handleLanguageChange} />

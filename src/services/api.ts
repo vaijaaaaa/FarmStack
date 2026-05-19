@@ -175,4 +175,16 @@ export const tallyApi = {
       method: 'POST',
       body: JSON.stringify({ action: 'sync-masters', masters }),
     }),
+  listLedgers: async (): Promise<{ ledgers: { name: string; parent: string }[]; error?: string }> => {
+    try {
+      const res = await fetch('/api/tally/ledgers')
+      const data = await res.json().catch(() => null)
+      if (data && Array.isArray(data.ledgers)) {
+        return { ledgers: data.ledgers, error: data.error }
+      }
+      return { ledgers: [], error: 'Could not read ledgers from Tally' }
+    } catch {
+      return { ledgers: [], error: 'Could not reach Tally' }
+    }
+  },
 }

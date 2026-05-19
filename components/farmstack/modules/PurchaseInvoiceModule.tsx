@@ -24,12 +24,10 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     hsn_code: '',
     unit: '',
     product_type: 'Purchase of Fertilizer',
-    location: '',
     gst_rate: '',
     selling_price: '',
     tally_price: '',
     expiry_date: '',
-    maintain_batches: false,
   })
   const [addSupplierError, setAddSupplierError] = useState('')
   const [addProductError, setAddProductError] = useState('')
@@ -227,12 +225,10 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       hsn_code: '',
       unit: '',
       product_type: 'Purchase of Fertilizer',
-      location: '',
       gst_rate: '',
       selling_price: '',
       tally_price: '',
       expiry_date: '',
-      maintain_batches: false,
     })
     setAddProductError('')
   }
@@ -251,12 +247,10 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         hsn_code: newProduct.hsn_code,
         unit: newProduct.unit,
         product_type: newProduct.product_type,
-        location: newProduct.location,
         gst_rate: Number(newProduct.gst_rate || 0),
         selling_price: Number(newProduct.selling_price || 0),
         tally_price: Number(newProduct.tally_price || 0),
         expiry_date: newProduct.expiry_date,
-        maintain_batches: newProduct.maintain_batches,
         tally_stock_item_name: productName,
       })
 
@@ -551,7 +545,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       </div>
 
       {showNewInvoice && (
-        <div className="rounded-lg bg-white p-2 shadow-sm border border-gray-200">
+        <div data-kbd-scope className="rounded-lg bg-white p-2 shadow-sm border border-gray-200">
           <div className="p-6">
             <div className="flex justify-between items-center mb-8">
               <h3 className="text-xl font-bold text-black">New Purchase</h3>
@@ -758,6 +752,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 </button>
                 <button
                   onClick={handleSavePurchase}
+                  data-kbd-submit
                   className="bg-[#6b66fc] hover:bg-[#5b56dc] text-white font-medium px-8 py-2 rounded-lg text-lg min-w-30"
                 >
                   Purchase
@@ -1095,16 +1090,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                   ))}
                 </select>
               </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">Location</label>
-                <input
-                  type="text"
-                  placeholder="Location"
-                  value={newProduct.location}
-                  onChange={(e) => setNewProduct({ ...newProduct, location: e.target.value })}
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                />
-              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex-1 flex flex-col">
                   <label className="text-gray-700 font-medium mb-1 text-sm">GST Rate</label>
@@ -1148,15 +1133,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                   />
                 </div>
               </div>
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={newProduct.maintain_batches}
-                  onChange={(e) => setNewProduct({ ...newProduct, maintain_batches: e.target.checked })}
-                  className="w-4 h-4 accent-green-500"
-                />
-                Maintain Batches
-              </label>
               {addProductError && (
                 <p className="text-sm text-red-600">{addProductError}</p>
               )}

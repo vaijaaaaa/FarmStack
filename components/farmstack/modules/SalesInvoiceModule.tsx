@@ -421,7 +421,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       </div>
 
       {showNewInvoice && (
-        <div className="rounded-lg bg-white p-2 shadow-sm border border-gray-200">
+        <div data-kbd-scope className="rounded-lg bg-white p-2 shadow-sm border border-gray-200">
           <div className="p-6">
             <div className="flex justify-between items-center mb-8">
               <h3 className="text-xl font-bold text-black">New Sale</h3>
@@ -597,6 +597,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               </button>
               <button
                 onClick={handleSaveInvoice}
+                data-kbd-submit
                 className="bg-[#6b66fc] hover:bg-[#5b56dc] text-white font-medium px-8 py-2 rounded-lg text-lg min-w-30"
               >
                 Sale

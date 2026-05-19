@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react'
+'use client'
+
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface Column {
   key: string
@@ -11,8 +13,46 @@ interface DataTableProps {
 }
 
 export default function DataTable({ columns, data }: DataTableProps) {
+  const [selected, setSelected] = useState(-1)
+  const bodyRef = useRef<HTMLTableSectionElement>(null)
+
+  // Keep selection valid as the data changes (filter, paginate, refresh).
+  useEffect(() => {
+    setSelected((s) => (data.length === 0 ? -1 : Math.min(s, data.length - 1)))
+  }, [data.length])
+
+  // Scroll the highlighted row into view.
+  useEffect(() => {
+    if (selected < 0 || !bodyRef.current) return
+    const row = bodyRef.current.children[selected] as HTMLElement | undefined
+    row?.scrollIntoView({ block: 'nearest' })
+  }, [selected])
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (data.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setSelected((s) => Math.min(s < 0 ? 0 : s + 1, data.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setSelected((s) => Math.max(s < 0 ? 0 : s - 1, 0))
+    } else if (e.key === 'Enter' && selected >= 0) {
+      const row = bodyRef.current?.children[selected] as HTMLElement | undefined
+      const action = row?.querySelector('[data-kbd-row-action]') as HTMLElement | null
+      if (action) {
+        e.preventDefault()
+        action.click()
+      }
+    }
+  }
+
   return (
-    <div className="overflow-x-auto">
+    <div
+      className="overflow-x-auto outline-none"
+      tabIndex={0}
+      role="grid"
+      onKeyDown={handleKeyDown}
+    >
       <table className="w-full">
         <thead>
           <tr className="border-b border-gray-200">
@@ -23,9 +63,15 @@ export default function DataTable({ columns, data }: DataTableProps) {
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody ref={bodyRef}>
           {data.map((row, idx) => (
-            <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+            <tr
+              key={idx}
+              onClick={() => setSelected(idx)}
+              className={`border-b border-gray-100 ${
+                idx === selected ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : 'hover:bg-gray-50'
+              }`}
+            >
               {columns.map((col) => (
                 <td key={col.key} className="px-4 py-3 text-sm text-gray-900">
                   {row[col.key]}

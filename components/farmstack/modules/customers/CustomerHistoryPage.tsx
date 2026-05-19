@@ -80,6 +80,7 @@ export default function CustomerHistoryPage({
       <div className="flex gap-2">
         <button
           onClick={() => onEditCustomer(customer)}
+          data-kbd-row-action
           className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-700 transition-colors hover:bg-gray-100"
         >
           <Edit2 size={14} />

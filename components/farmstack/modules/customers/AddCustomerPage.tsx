@@ -164,7 +164,7 @@ export default function AddCustomerPage({
   }
 
   return (
-    <div className="flex h-[calc(100vh-8.5rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
+    <div data-kbd-scope className="flex h-[calc(100vh-8.5rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
       {/* Sticky header */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-6 py-4">
         <button
@@ -320,6 +320,7 @@ export default function AddCustomerPage({
                   placeholder="Enter display number"
                 />
               </div>
+
             </div>
           </div>
         ))}
@@ -337,6 +338,7 @@ export default function AddCustomerPage({
         <Button
           onClick={handleSave}
           disabled={loading}
+          data-kbd-submit
           className="bg-black text-white hover:bg-gray-900 disabled:opacity-50"
         >
           {loading ? 'Saving...' : editingCustomer ? 'Update Customer' : 'Add Customer'}

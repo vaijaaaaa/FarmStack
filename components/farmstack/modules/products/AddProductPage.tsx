@@ -232,7 +232,7 @@ export default function AddProductPage({
   }
 
   return (
-    <div className="flex h-[calc(100vh-8.5rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
+    <div data-kbd-scope className="flex h-[calc(100vh-8.5rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
       {/* Sticky header */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-6 py-4">
         <button
@@ -393,6 +393,7 @@ export default function AddProductPage({
         <Button
           onClick={handleSave}
           disabled={loading}
+          data-kbd-submit
           className="bg-black text-white hover:bg-gray-900 disabled:opacity-50"
         >
           {loading ? 'Saving...' : editingProduct ? 'Update Product' : 'Add Product'}
@@ -402,7 +403,7 @@ export default function AddProductPage({
       {/* Add Product Type modal */}
       {showAddTypeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white">
+          <div data-kbd-scope className="w-full max-w-md rounded-lg bg-white">
             <div className="border-b border-gray-200 px-6 py-4">
               <h2 className="text-lg font-bold text-black">Add Product Type</h2>
             </div>
@@ -440,6 +441,7 @@ export default function AddProductPage({
               </Button>
               <Button
                 onClick={handleSaveNewType}
+                data-kbd-submit
                 className="bg-black text-white hover:bg-gray-900"
               >
                 Add Type
