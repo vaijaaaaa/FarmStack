@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Language, Customer } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { customerApi } from '@/src/services/api'
@@ -68,6 +68,15 @@ export default function AddCustomerPage({
   )
   const [loading, setLoading] = useState(false)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const shouldScrollToNew = useRef(false)
+
+  useEffect(() => {
+    if (shouldScrollToNew.current && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+      shouldScrollToNew.current = false
+    }
+  }, [customers.length])
 
   const validateCustomer = (customer: CustomerFormData) => {
     const errs: string[] = []
@@ -109,7 +118,8 @@ export default function AddCustomerPage({
   }
 
   const handleAddRow = () => {
-    setCustomers([...customers, emptyCustomer])
+    shouldScrollToNew.current = true
+    setCustomers([...customers, { ...emptyCustomer }])
   }
 
   const handleRemoveRow = (index: number) => {
@@ -154,35 +164,33 @@ export default function AddCustomerPage({
   }
 
   return (
-    <div className="flex h-[calc(100vh-10rem)] min-h-0 flex-col gap-6">
-      <div className="sticky top-0 z-20 rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <button
-            onClick={onBack}
-            className="inline-flex items-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-900"
+    <div className="flex h-[calc(100vh-8.5rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
+      {/* Sticky header */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-6 py-4">
+        <button
+          onClick={onBack}
+          className="inline-flex items-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-900"
+        >
+          ← Back to List
+        </button>
+        {!editingCustomer && (
+          <Button
+            onClick={handleAddRow}
+            type="button"
+            variant="outline"
+            size="sm"
+            className="inline-flex items-center justify-center border-black text-black hover:bg-black hover:text-white"
           >
-            ← Back to List
-          </button>
-          <div className="flex flex-wrap items-center gap-3">
-            {!editingCustomer && (
-              <Button
-                onClick={handleAddRow}
-                type="button"
-                variant="outline"
-                size="sm"
-                className="inline-flex items-center justify-center border-black text-black hover:bg-black hover:text-white"
-              >
-                <Plus size={16} />
-                Add Another Customer
-              </Button>
-            )}
-          </div>
-        </div>
+            <Plus size={16} />
+            Add Another Customer
+          </Button>
+        )}
       </div>
 
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-2 pb-28">
+      {/* Scrollable form body */}
+      <div ref={scrollRef} className="min-h-0 flex-1 divide-y divide-gray-100 overflow-y-auto">
         {customers.map((customer, index) => (
-          <div key={index} className="rounded-lg border border-gray-200 bg-white p-6">
+          <div key={index} className="px-6 py-6">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-base font-semibold text-black">
                 {editingCustomer ? 'Customer Details' : `Customer ${index + 1}`}
@@ -209,7 +217,7 @@ export default function AddCustomerPage({
               </div>
             )}
 
-            <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Customer Name</label>
                 <input
@@ -315,18 +323,24 @@ export default function AddCustomerPage({
             </div>
           </div>
         ))}
-
       </div>
 
-      <div className="sticky bottom-0 z-20 rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-[0_-4px_18px_rgba(0,0,0,0.06)]">
-        <div className="flex justify-center gap-3">
-          <Button onClick={onBack} className="bg-gray-300 text-gray-800 hover:bg-gray-400">
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={loading} className="bg-black text-white hover:bg-gray-900 disabled:opacity-50">
-            {loading ? 'Saving...' : editingCustomer ? 'Update Customer' : 'Add Customer'}
-          </Button>
-        </div>
+      {/* Sticky footer */}
+      <div className="flex shrink-0 items-center justify-end gap-3 border-t border-gray-200 px-6 py-4">
+        <Button
+          onClick={onBack}
+          variant="ghost"
+          className="text-gray-600 hover:bg-gray-100 hover:text-black"
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSave}
+          disabled={loading}
+          className="bg-black text-white hover:bg-gray-900 disabled:opacity-50"
+        >
+          {loading ? 'Saving...' : editingCustomer ? 'Update Customer' : 'Add Customer'}
+        </Button>
       </div>
     </div>
   )
