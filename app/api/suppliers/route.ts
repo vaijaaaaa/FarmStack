@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
+    const useLegacyArray =
+      !searchParams.has('page') &&
+      !searchParams.has('limit') &&
+      !searchParams.has('search') &&
+      !searchParams.has('searchBy')
+
     const page = parseInt(searchParams.get('page') ?? '1', 10)
     const limit = parseInt(searchParams.get('limit') ?? '10', 10)
     const search = searchParams.get('search') ?? ''
@@ -51,6 +57,10 @@ export async function GET(request: Request) {
     `
     params.push(limit, offset)
     const rows = await query(sql, params)
+
+    if (useLegacyArray) {
+      return NextResponse.json(rows)
+    }
 
     return NextResponse.json({
       data: rows,

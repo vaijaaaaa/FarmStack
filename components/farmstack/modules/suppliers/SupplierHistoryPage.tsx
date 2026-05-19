@@ -6,7 +6,7 @@ import { getTranslation } from '@/lib/translations'
 import { supplierApi } from '@/src/services/api'
 import { Button } from '@/components/ui/button'
 import DataTable from '../../components/DataTable'
-import { ChevronLeft, ChevronRight, Search, Edit2, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Edit2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface SupplierHistoryPageProps {
@@ -30,7 +30,6 @@ export default function SupplierHistoryPage({
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
   const [searchBy, setSearchBy] = useState('name')
-  const [searching, setSearching] = useState(false)
 
   const limit = 10
 
@@ -53,18 +52,13 @@ export default function SupplierHistoryPage({
     fetchSuppliers(1, search, searchBy)
   }, [])
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    setSearching(true)
-    fetchSuppliers(1, search, searchBy)
-    setSearching(false)
-  }
-
-  const handleClearSearch = () => {
-    setSearch('')
-    setSearchBy('name')
-    fetchSuppliers(1, '', 'name')
-  }
+  // Auto-search when search or searchBy changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchSuppliers(1, search, searchBy)
+    }, 300) // Debounce for 300ms
+    return () => clearTimeout(timer)
+  }, [search, searchBy])
 
   const handleNextPage = () => {
     if (currentPage < totalPages) {
@@ -132,8 +126,8 @@ export default function SupplierHistoryPage({
 
       {/* Search Section */}
       <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <form onSubmit={handleSearch} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Search By</label>
               <select
@@ -157,30 +151,13 @@ export default function SupplierHistoryPage({
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
               />
             </div>
-            <div className="flex items-end gap-2">
-              <button
-                type="submit"
-                disabled={searching || loading}
-                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-400 flex items-center justify-center gap-2"
-              >
-                <Search size={16} />
-                Search
-              </button>
-              <button
-                type="button"
-                onClick={handleClearSearch}
-                className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-              >
-                Clear
-              </button>
-            </div>
           </div>
           {search && (
             <p className="text-sm text-gray-600">
               Showing results for: <span className="font-medium">{search}</span> in <span className="font-medium">{searchBy}</span>
             </p>
           )}
-        </form>
+        </div>
       </div>
 
       {/* Table Section */}

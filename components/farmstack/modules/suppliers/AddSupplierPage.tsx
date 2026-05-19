@@ -6,7 +6,7 @@ import { getTranslation } from '@/lib/translations'
 import { supplierApi } from '@/src/services/api'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 
 interface SupplierFormData {
   name: string
@@ -65,8 +65,20 @@ export default function AddSupplierPage({
     if (!supplier.name.trim()) {
       errs.push('Supplier name is required')
     }
+    if (!supplier.phone.trim()) {
+      errs.push('Phone number is required')
+    }
     if (supplier.phone && !/^[0-9]{10}$/.test(supplier.phone)) {
       errs.push('Phone number must be 10 digits')
+    }
+    if (!supplier.state.trim()) {
+      errs.push('State is required')
+    }
+    if (!supplier.country.trim()) {
+      errs.push('Country is required')
+    }
+    if (!supplier.place_of_supply.trim()) {
+      errs.push('Place of supply is required')
     }
     if (supplier.gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(supplier.gstin)) {
       errs.push('Invalid GSTIN format (should be like 27AABCT1234H1Z0)')
@@ -152,14 +164,10 @@ export default function AddSupplierPage({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-black">
-          {editingSupplier ? 'Edit Supplier' : 'Add Supplier'}
-        </h2>
+      <div className="flex justify-start">
         <button
           onClick={onBack}
-          className="text-sm text-gray-600 hover:text-gray-900"
+          className="inline-flex items-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-900"
         >
           ← Back to List
         </button>
@@ -173,13 +181,13 @@ export default function AddSupplierPage({
             className="rounded-lg border border-gray-200 bg-white p-6"
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-black">
+              <h3 className="text-base font-semibold text-black">
                 {editingSupplier ? 'Supplier Details' : `Supplier ${index + 1}`}
               </h3>
               {!editingSupplier && suppliers.length > 1 && (
                 <button
                   onClick={() => handleRemoveRow(index)}
-                  className="inline-flex items-center gap-1 px-3 py-1 text-xs bg-red-50 text-red-700 hover:bg-red-100 rounded transition-colors"
+                  className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-3 py-1 text-xs text-red-700 transition-colors hover:bg-red-100"
                 >
                   <Trash2 size={14} />
                   Remove
@@ -203,7 +211,7 @@ export default function AddSupplierPage({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Supplier Name <span className="text-red-600">*</span>
+                  Supplier Name
                 </label>
                 <input
                   type="text"
@@ -217,7 +225,7 @@ export default function AddSupplierPage({
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Phone Number <span className="text-gray-400">(10 digits)</span>
+                  Phone Number
                 </label>
                 <input
                   type="tel"
@@ -229,15 +237,15 @@ export default function AddSupplierPage({
                 />
               </div>
 
-              <div className="md:col-span-2">
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Address
                 </label>
-                <textarea
+                <input
+                  type="text"
                   value={supplier.address}
                   onChange={(e) => handleSupplierChange(index, 'address', e.target.value)}
-                  placeholder="Enter supplier address"
-                  rows={3}
+                  placeholder="Enter address"
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
                 />
               </div>
@@ -270,7 +278,7 @@ export default function AddSupplierPage({
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  GSTIN <span className="text-gray-400">(optional)</span>
+                  GSTIN
                 </label>
                 <input
                   type="text"
@@ -301,12 +309,16 @@ export default function AddSupplierPage({
       {/* Action Buttons */}
       <div className="space-y-3">
         {!editingSupplier && (
-          <button
+          <Button
             onClick={handleAddRow}
-            className="w-full border-2 border-dashed border-gray-300 px-4 py-3 text-center text-sm font-medium text-gray-700 hover:border-gray-400 hover:bg-gray-50 rounded-md transition-colors"
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mx-auto flex w-fit min-w-55 items-center justify-center border-black text-black hover:bg-black hover:text-white"
           >
-            + Add Another Supplier
-          </button>
+            <Plus size={16} />
+            Add Another Supplier
+          </Button>
         )}
 
         <div className="flex gap-3 justify-end">
