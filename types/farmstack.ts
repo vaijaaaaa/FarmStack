@@ -14,7 +14,13 @@ export interface Customer extends TallyMasterFields {
   phone: string
   address: string
   kannada_address: string
+  state?: string
+  country?: string
   gstin: string
+  acres?: string
+  loyalty?: string
+  referral?: string
+  display_number?: string
   tally_ledger_name: string
 }
 
@@ -26,7 +32,9 @@ export interface Supplier extends TallyMasterFields {
   address: string
   kannada_address: string
   state?: string
+  country?: string
   gstin: string
+  place_of_supply?: string
   tally_ledger_name: string
 }
 

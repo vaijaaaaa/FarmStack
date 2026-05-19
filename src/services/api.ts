@@ -15,14 +15,36 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export const customerApi = {
   list: () => request<Customer[]>('/api/customers'),
+  listPaginated: (page: number = 1, limit: number = 10, search: string = '', searchBy: string = 'name') =>
+    request<{ data: Customer[]; total: number; page: number; limit: number; totalPages: number }>(
+      `/api/customers?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}&searchBy=${searchBy}`,
+    ),
   create: (payload: Partial<Customer>) =>
     request<Customer>('/api/customers', { method: 'POST', body: JSON.stringify(payload) }),
+  update: (id: string, payload: Partial<Customer>) =>
+    request<Customer>('/api/customers', { method: 'PUT', body: JSON.stringify({ id, ...payload }) }),
+  bulkUpload: (customers: any[]) =>
+    request<{ success: number; failed: number; errors: any[]; created: any[] }>(
+      '/api/customers/bulk',
+      { method: 'POST', body: JSON.stringify({ customers }) },
+    ),
 }
 
 export const supplierApi = {
   list: () => request<Supplier[]>('/api/suppliers'),
+  listPaginated: (page: number = 1, limit: number = 10, search: string = '', searchBy: string = 'name') =>
+    request<{ data: Supplier[]; total: number; page: number; limit: number; totalPages: number }>(
+      `/api/suppliers?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}&searchBy=${searchBy}`,
+    ),
   create: (payload: Partial<Supplier>) =>
     request<Supplier>('/api/suppliers', { method: 'POST', body: JSON.stringify(payload) }),
+  update: (id: string, payload: Partial<Supplier>) =>
+    request<Supplier>('/api/suppliers', { method: 'PUT', body: JSON.stringify({ id, ...payload }) }),
+  bulkUpload: (suppliers: any[]) =>
+    request<{ success: number; failed: number; errors: any[]; created: any[] }>(
+      '/api/suppliers/bulk',
+      { method: 'POST', body: JSON.stringify({ suppliers }) },
+    ),
 }
 
 export const productApi = {

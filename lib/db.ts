@@ -14,7 +14,13 @@ CREATE TABLE IF NOT EXISTS customers (
   phone TEXT DEFAULT '',
   address TEXT DEFAULT '',
   kannada_address TEXT DEFAULT '',
+  state TEXT DEFAULT '',
+  country TEXT DEFAULT '',
   gstin TEXT DEFAULT '',
+  acres TEXT DEFAULT '',
+  loyalty TEXT DEFAULT '',
+  referral TEXT DEFAULT '',
+  display_number TEXT DEFAULT '',
   tally_ledger_name TEXT DEFAULT '',
   created_at TEXT NOT NULL
 );
@@ -27,7 +33,9 @@ CREATE TABLE IF NOT EXISTS suppliers (
   address TEXT DEFAULT '',
   kannada_address TEXT DEFAULT '',
   state TEXT DEFAULT '',
+  country TEXT DEFAULT '',
   gstin TEXT DEFAULT '',
+  place_of_supply TEXT DEFAULT '',
   tally_ledger_name TEXT DEFAULT '',
   created_at TEXT NOT NULL
 );
@@ -175,11 +183,19 @@ function applySchema(db: any): void {
     for (const [col, def] of tallyColumns) ensureColumn(db, table, col, def)
   }
   ensureColumn(db, 'sales_items', 'type', "TEXT DEFAULT ''")
+  ensureColumn(db, 'suppliers', 'country', "TEXT DEFAULT ''")
+  ensureColumn(db, 'suppliers', 'place_of_supply', "TEXT DEFAULT ''")
   const masterTallyColumns: Array<[string, string]> = [
     ['tally_sync_status', "TEXT DEFAULT 'not_synced'"],
     ['tally_response', 'TEXT'],
     ['tally_synced_at', 'TEXT'],
   ]
+  ensureColumn(db, 'customers', 'state', "TEXT DEFAULT ''")
+  ensureColumn(db, 'customers', 'country', "TEXT DEFAULT ''")
+  ensureColumn(db, 'customers', 'acres', "TEXT DEFAULT ''")
+  ensureColumn(db, 'customers', 'loyalty', "TEXT DEFAULT ''")
+  ensureColumn(db, 'customers', 'referral', "TEXT DEFAULT ''")
+  ensureColumn(db, 'customers', 'display_number', "TEXT DEFAULT ''")
   for (const table of ['customers', 'suppliers', 'products', 'product_types']) {
     for (const [col, def] of masterTallyColumns) ensureColumn(db, table, col, def)
   }
