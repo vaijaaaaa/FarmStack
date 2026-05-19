@@ -18,7 +18,6 @@ interface ProductFormData {
   selling_price: string
   tally_price: string
   expiry_date: string
-  maintain_batches: boolean
 }
 
 const emptyProduct: ProductFormData = {
@@ -30,7 +29,6 @@ const emptyProduct: ProductFormData = {
   selling_price: '',
   tally_price: '',
   expiry_date: '',
-  maintain_batches: false,
 }
 
 interface AddProductPageProps {
@@ -61,7 +59,6 @@ export default function AddProductPage({
             tally_price:
               editingProduct.tally_price != null ? String(editingProduct.tally_price) : '',
             expiry_date: editingProduct.expiry_date || '',
-            maintain_batches: Boolean(editingProduct.maintain_batches),
           },
         ]
       : [{ ...emptyProduct }],
@@ -120,7 +117,7 @@ export default function AddProductPage({
   const handleProductChange = (
     index: number,
     field: keyof ProductFormData,
-    value: string | boolean,
+    value: string,
   ) => {
     const updated = [...products]
     updated[index] = { ...updated[index], [field]: value }
@@ -206,7 +203,6 @@ export default function AddProductPage({
           selling_price: Number(products[0].selling_price || 0),
           tally_price: Number(products[0].tally_price || 0),
           expiry_date: products[0].expiry_date,
-          maintain_batches: products[0].maintain_batches,
           tally_stock_item_name: products[0].name,
         })
         toast.success('Product updated successfully')
@@ -221,7 +217,6 @@ export default function AddProductPage({
             selling_price: Number(product.selling_price || 0),
             tally_price: Number(product.tally_price || 0),
             expiry_date: product.expiry_date,
-            maintain_batches: product.maintain_batches,
             tally_stock_item_name: product.name,
           })
         }
@@ -381,15 +376,6 @@ export default function AddProductPage({
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
                 />
               </div>
-              <label className="flex items-center gap-2 pt-1 text-sm font-medium text-gray-700 md:col-span-2">
-                <input
-                  type="checkbox"
-                  checked={product.maintain_batches}
-                  onChange={(e) => handleProductChange(index, 'maintain_batches', e.target.checked)}
-                  className="h-4 w-4 accent-black"
-                />
-                Maintain Batches
-              </label>
             </div>
           </div>
         ))}

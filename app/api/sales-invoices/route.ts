@@ -18,7 +18,7 @@ interface SalesItemInput {
 export async function GET() {
   try {
     const invoices = await query<Record<string, unknown>>(
-      'SELECT * FROM sales_invoices ORDER BY created_at',
+      'SELECT * FROM sales_invoices ORDER BY created_at DESC',
     )
     const items = await query<Record<string, unknown>>('SELECT * FROM sales_items')
     const byInvoice = new Map<string, unknown[]>()

@@ -46,7 +46,7 @@ export async function GET() {
               it.total_price    AS total_price
        FROM purchase_items it
        JOIN purchase_invoices pi ON pi.id = it.invoice_id
-       ORDER BY pi.created_at`,
+       ORDER BY pi.created_at DESC`,
     )
     return NextResponse.json(rows)
   } catch (err) {
