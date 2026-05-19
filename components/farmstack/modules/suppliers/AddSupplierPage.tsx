@@ -163,18 +163,34 @@ export default function AddSupplierPage({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-start">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-900"
-        >
-          ← Back to List
-        </button>
+    <div className="flex h-[calc(100vh-10rem)] min-h-0 flex-col gap-6">
+      <div className="sticky top-0 z-20 rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-900"
+          >
+            ← Back to List
+          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            {!editingSupplier && (
+              <Button
+                onClick={handleAddRow}
+                type="button"
+                variant="outline"
+                size="sm"
+                className="inline-flex items-center justify-center border-black text-black hover:bg-black hover:text-white"
+              >
+                <Plus size={16} />
+                Add Another Supplier
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Supplier Forms */}
-      <div className="space-y-6">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-2 pb-28">
         {suppliers.map((supplier, index) => (
           <div
             key={index}
@@ -304,24 +320,11 @@ export default function AddSupplierPage({
             </div>
           </div>
         ))}
+
       </div>
 
-      {/* Action Buttons */}
-      <div className="space-y-3">
-        {!editingSupplier && (
-          <Button
-            onClick={handleAddRow}
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mx-auto flex w-fit min-w-55 items-center justify-center border-black text-black hover:bg-black hover:text-white"
-          >
-            <Plus size={16} />
-            Add Another Supplier
-          </Button>
-        )}
-
-        <div className="flex gap-3 justify-end">
+      <div className="sticky bottom-0 z-20 rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-[0_-4px_18px_rgba(0,0,0,0.06)]">
+        <div className="flex justify-center gap-3">
           <Button
             onClick={onBack}
             className="bg-gray-300 text-gray-800 hover:bg-gray-400"
@@ -333,7 +336,7 @@ export default function AddSupplierPage({
             disabled={loading}
             className="bg-black text-white hover:bg-gray-900 disabled:opacity-50"
           >
-            {loading ? 'Saving...' : editingSupplier ? 'Update Supplier' : 'Add Supplier(s)'}
+            {loading ? 'Saving...' : editingSupplier ? 'Update Supplier' : 'Add Supplier'}
           </Button>
         </div>
       </div>
