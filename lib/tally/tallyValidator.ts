@@ -27,7 +27,12 @@ export function validateVoucher(
     if (!it.ledgerName || !it.ledgerName.trim()) {
       errors.push(`${n}: ${kind} ledger (type) is missing`)
     }
-    if (!(it.quantity > 0)) errors.push(`${n}: quantity must be greater than 0`)
+    if (!Number.isFinite(it.quantity) || !(it.quantity > 0)) {
+      errors.push(`${n}: Quantity is required for all ${kind} items before syncing to Tally — it must be a number greater than 0.`)
+    }
+    if (!it.unit || !it.unit.trim()) {
+      errors.push(`${n}: unit is missing — set the product's unit (e.g. Kg, Bag, Nos) before syncing to Tally, otherwise stock cannot be posted.`)
+    }
     if (!(it.rate > 0)) errors.push(`${n}: rate must be greater than 0`)
   })
 

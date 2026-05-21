@@ -10,6 +10,7 @@ import {
 import { validateVoucher } from './tallyValidator'
 import { parseTallyResponse } from './tallyResponseParser'
 import { ensureMastersForVoucher } from './tallyMasterSync'
+import { getStockMap } from '@/lib/stock'
 
 export type TallyStatus = 'not_synced' | 'pending' | 'synced' | 'failed' | 'blocked'
 
@@ -128,7 +129,9 @@ export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
       })),
     })
     const xml = buildPurchaseVoucherXml(input)
+    console.log('[FarmStack→Tally] Purchase voucher XML sent:\n' + xml)
     const raw = await postXml(xml)
+    console.log('[Tally] Purchase voucher response:\n' + raw)
     const parsed = parseTallyResponse(raw)
     const outcome: SyncOutcome = {
       status: parsed.success ? 'synced' : 'failed',
@@ -182,6 +185,27 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
     }
     await setSalesStatus(id, outcome)
     return outcome
+  }
+
+  // Never sync a sale that exceeds available stock. Exclude this invoice's own
+  // sold quantity so re-syncing a saved sale validates against everything else.
+  const stock = await getStockMap(id)
+  const requestedByProduct = new Map<string, number>()
+  for (const it of items) {
+    const pid = String(it.product_id || '')
+    requestedByProduct.set(pid, (requestedByProduct.get(pid) || 0) + Number(it.quantity || 0))
+  }
+  for (const [pid, requested] of requestedByProduct) {
+    const available = stock.get(pid)?.available ?? 0
+    if (requested > available) {
+      const name = (await productName(pid)) || 'a product'
+      const outcome: SyncOutcome = {
+        status: 'failed',
+        message: `Insufficient stock for ${name}. Available: ${available}, Requested: ${requested}. Sale not sent to Tally.`,
+      }
+      await setSalesStatus(id, outcome)
+      return outcome
+    }
   }
 
   const voucherItems: VoucherItem[] = []

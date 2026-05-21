@@ -121,6 +121,16 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   }
 
   const handleAddRow = () => {
+    // Quantity is mandatory — don't let a new item be added while an existing
+    // one is still missing a valid quantity.
+    const missing = purchaseItems.findIndex((it) => {
+      const qty = Number(String(it.quantity ?? '').trim())
+      return !Number.isFinite(qty) || qty <= 0
+    })
+    if (missing !== -1) {
+      toast.error(`Item ${missing + 1}: Quantity is required before adding another item.`)
+      return
+    }
     setPurchaseItems([...purchaseItems, {
       selectedProduct: '',
       quantity: '',
@@ -461,15 +471,31 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       return
     }
 
-    const validItems = purchaseItems.filter(item => {
-      const quantity = parseFloat(item.quantity || '0')
-      const buyingPrice = parseFloat(item.buyingPrice || '0')
-      return item.selectedProduct && quantity > 0 && buyingPrice > 0
-    })
-    if (validItems.length === 0) {
-      toast.error('Please ensure all products have product name, quantity, and buying price greater than 0')
-      return
+    // Every item must be valid — quantity is mandatory and must be > 0.
+    for (let i = 0; i < purchaseItems.length; i++) {
+      const item = purchaseItems[i]
+      const label = `Item ${i + 1}`
+      if (!item.selectedProduct) {
+        toast.error(`${label}: Please select a product.`)
+        return
+      }
+      const qtyRaw = String(item.quantity ?? '').trim()
+      if (qtyRaw === '') {
+        toast.error(`${label}: Quantity is required.`)
+        return
+      }
+      const qty = Number(qtyRaw)
+      if (!Number.isFinite(qty) || qty <= 0) {
+        toast.error(`${label}: Quantity must be greater than 0.`)
+        return
+      }
+      const price = Number(String(item.buyingPrice ?? '').trim())
+      if (!Number.isFinite(price) || price <= 0) {
+        toast.error(`${label}: Buying price must be greater than 0.`)
+        return
+      }
     }
+    const validItems = purchaseItems
     const supplier = mockSuppliers.find((s) => s.id === selectedSupplier)
 
     const items = validItems.map((item) => {
@@ -629,7 +655,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 <thead className="bg-[#e0e0e0] text-gray-800 border-b border-gray-300">
                   <tr>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Name</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity</th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Buying Price</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Selling Price</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tally Price</th>

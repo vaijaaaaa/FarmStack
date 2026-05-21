@@ -99,14 +99,24 @@ export async function POST(request: Request) {
         total_price: totalPrice,
       }
     })
-    const invalidItem = builtItems.find(
-      (it) => !it.product_id || it.quantity <= 0 || it.buying_price <= 0,
-    )
-    if (invalidItem) {
-      return NextResponse.json(
-        { error: 'Each purchase item must have a product, quantity, and buying price greater than 0' },
-        { status: 400 },
-      )
+    for (let i = 0; i < builtItems.length; i++) {
+      const it = builtItems[i]
+      const label = `Item ${i + 1}`
+      if (!it.product_id) {
+        return NextResponse.json({ error: `${label}: a product is required.` }, { status: 400 })
+      }
+      if (!Number.isFinite(it.quantity) || it.quantity <= 0) {
+        return NextResponse.json(
+          { error: `${label}: Quantity is required and must be greater than 0.` },
+          { status: 400 },
+        )
+      }
+      if (!Number.isFinite(it.buying_price) || it.buying_price <= 0) {
+        return NextResponse.json(
+          { error: `${label}: Buying price must be greater than 0.` },
+          { status: 400 },
+        )
+      }
     }
     const total = builtItems.reduce((sum, it) => sum + it.total_price, 0)
     const initialStatus = tallySyncEnabled ? 'pending' : 'not_synced'

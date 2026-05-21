@@ -79,21 +79,27 @@ function gstFor(items: VoucherItem[]): GstTotals {
 function inventoryEntry(it: VoucherItem, deemedPositive: boolean, signedAmount: number): string {
   const dp = deemedPositive ? 'Yes' : 'No'
   const batchName = it.batch?.trim() || 'Primary Batch'
-  const expiry = it.expiryDate ? `<EXPIRYDATE>${tallyDate(it.expiryDate)}</EXPIRYDATE>` : ''
+  // ACTUALQTY/BILLEDQTY are ALWAYS a positive physical quantity. Tally decides
+  // stock IN vs OUT from the voucher type (Purchase = inward, Sales = outward)
+  // together with ISDEEMEDPOSITIVE — NOT from the quantity's sign. A negative
+  // billed qty is read by Tally as a return/reversal, so a purchase sent with
+  // a negative qty posts 0 net stock.
+  // No EXPIRYDATE: products are not batch/expiry tracked, and sending it makes
+  // Tally discard the batch allocation (and the quantity inside it).
+  const qtyStr = esc(qtyWithUnit(Math.abs(it.quantity), it.unit))
   return `
         <ALLINVENTORYENTRIES.LIST>
           <STOCKITEMNAME>${esc(it.productName)}</STOCKITEMNAME>
           <ISDEEMEDPOSITIVE>${dp}</ISDEEMEDPOSITIVE>
           <RATE>${money(it.rate)}/${esc(it.unit || 'Nos')}</RATE>
           <AMOUNT>${money(signedAmount)}</AMOUNT>
-          <ACTUALQTY>${esc(qtyWithUnit(it.quantity, it.unit))}</ACTUALQTY>
-          <BILLEDQTY>${esc(qtyWithUnit(it.quantity, it.unit))}</BILLEDQTY>
+          <ACTUALQTY>${qtyStr}</ACTUALQTY>
+          <BILLEDQTY>${qtyStr}</BILLEDQTY>
           <BATCHALLOCATIONS.LIST>
             <BATCHNAME>${esc(batchName)}</BATCHNAME>
-            ${expiry}
             <AMOUNT>${money(signedAmount)}</AMOUNT>
-            <ACTUALQTY>${esc(qtyWithUnit(it.quantity, it.unit))}</ACTUALQTY>
-            <BILLEDQTY>${esc(qtyWithUnit(it.quantity, it.unit))}</BILLEDQTY>
+            <ACTUALQTY>${qtyStr}</ACTUALQTY>
+            <BILLEDQTY>${qtyStr}</BILLEDQTY>
           </BATCHALLOCATIONS.LIST>
           <ACCOUNTINGALLOCATIONS.LIST>
             <LEDGERNAME>${esc(it.ledgerName)}</LEDGERNAME>
@@ -156,6 +162,9 @@ export function buildPurchaseVoucherXml(input: VoucherInput): string {
             <DATE>${tallyDate(input.date)}</DATE>
             <EFFECTIVEDATE>${tallyDate(input.date)}</EFFECTIVEDATE>
             <VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME>
+            <ISINVOICE>Yes</ISINVOICE>
+            <VCHENTRYMODE>Item Invoice</VCHENTRYMODE>
+            <PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW>
             ${input.voucherNumber ? `<VOUCHERNUMBER>${esc(input.voucherNumber)}</VOUCHERNUMBER>` : ''}
             <REFERENCE>${esc(input.reference || '')}</REFERENCE>
             <PARTYLEDGERNAME>${esc(input.partyLedger)}</PARTYLEDGERNAME>
@@ -203,6 +212,9 @@ export function buildSalesVoucherXml(input: VoucherInput): string {
             <DATE>${tallyDate(input.date)}</DATE>
             <EFFECTIVEDATE>${tallyDate(input.date)}</EFFECTIVEDATE>
             <VOUCHERTYPENAME>Sales</VOUCHERTYPENAME>
+            <ISINVOICE>Yes</ISINVOICE>
+            <VCHENTRYMODE>Item Invoice</VCHENTRYMODE>
+            <PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW>
             <REFERENCE>${esc(input.reference || input.voucherNumber || '')}</REFERENCE>
             <PARTYLEDGERNAME>${esc(input.partyLedger)}</PARTYLEDGERNAME>
             <PARTYNAME>${esc(input.partyLedger)}</PARTYNAME>

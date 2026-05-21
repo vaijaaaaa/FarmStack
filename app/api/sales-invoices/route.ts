@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
-import { query, execute, transaction, newId, nowIso } from '@/lib/db'
+import { query, queryOne, execute, transaction, newId, nowIso } from '@/lib/db'
 import { syncSalesInvoice } from '@/lib/tally/tallySyncService'
+import { getStockMap } from '@/lib/stock'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,14 +66,58 @@ export async function POST(request: Request) {
       gst: Number(it.gst ?? 0),
       type: String(it.type ?? ''),
     }))
-    const invalidItem = builtItems.find(
-      (it) => !it.product_id || it.quantity <= 0 || it.rate <= 0,
-    )
-    if (invalidItem) {
-      return NextResponse.json(
-        { error: 'Each sale item must have a product, quantity, and selling price greater than 0' },
-        { status: 400 },
+    for (let i = 0; i < builtItems.length; i++) {
+      const it = builtItems[i]
+      const label = `Item ${i + 1}`
+      if (!it.product_id) {
+        return NextResponse.json({ error: `${label}: a product is required.` }, { status: 400 })
+      }
+      if (!Number.isFinite(it.quantity) || it.quantity <= 0) {
+        return NextResponse.json(
+          { error: `${label}: Quantity is required and must be greater than 0.` },
+          { status: 400 },
+        )
+      }
+      if (!Number.isFinite(it.rate) || it.rate <= 0) {
+        return NextResponse.json(
+          { error: `${label}: Selling price must be greater than 0.` },
+          { status: 400 },
+        )
+      }
+    }
+
+    // Stock check — a product can only be sold if purchase stock exists and is
+    // enough. requested quantity is summed per product across all items.
+    const stock = await getStockMap()
+    const requestedByProduct = new Map<string, number>()
+    for (const it of builtItems) {
+      requestedByProduct.set(
+        it.product_id,
+        (requestedByProduct.get(it.product_id) || 0) + it.quantity,
       )
+    }
+    for (const [productId, requested] of requestedByProduct) {
+      const available = stock.get(productId)?.available ?? 0
+      const prod = await queryOne<{ name: string; unit: string }>(
+        'SELECT name, unit FROM products WHERE id = ?',
+        [productId],
+      )
+      const name = prod?.name || 'this product'
+      const unit = prod?.unit || ''
+      if (available <= 0) {
+        return NextResponse.json(
+          { error: `No stock available for ${name}. Please add purchase stock first.` },
+          { status: 400 },
+        )
+      }
+      if (requested > available) {
+        return NextResponse.json(
+          {
+            error: `Insufficient stock for ${name}. Available: ${available} ${unit}, Requested: ${requested} ${unit}.`,
+          },
+          { status: 400 },
+        )
+      }
     }
     const total = builtItems.reduce(
       (sum, it) => sum + it.quantity * it.rate * (1 + it.gst / 100),

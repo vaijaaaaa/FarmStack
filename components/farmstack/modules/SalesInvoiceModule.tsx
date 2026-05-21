@@ -91,6 +91,20 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       .map((p) => p.product_id),
   )
 
+  // Available stock per product = total purchased - total sold (saved sales).
+  const stockByProduct = new Map<string, number>()
+  for (const p of purchaseInvoices) {
+    const pid = String(p.product_id || '')
+    if (pid) stockByProduct.set(pid, (stockByProduct.get(pid) || 0) + Number(p.quantity || 0))
+  }
+  for (const inv of invoices) {
+    for (const it of inv.items || []) {
+      const pid = String(it.product_id || '')
+      if (pid) stockByProduct.set(pid, (stockByProduct.get(pid) || 0) - Number(it.quantity || 0))
+    }
+  }
+  const availableStock = (productId: string) => stockByProduct.get(productId) ?? 0
+
   const tableData = invoices.flatMap((invoice) => {
     const customer = mockCustomers.find((c) => c.id === invoice.customer_id)
     const invoiceDate = invoice.date || new Date(invoice.created_at).toISOString().split('T')[0]
@@ -137,6 +151,11 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   }
 
   const handleProductSelectChange = (index: number, productId: string) => {
+    // Block products that have no purchase stock — they cannot be sold.
+    if (productId && availableStock(productId) <= 0) {
+      toast.error('No stock available for this product. Please add purchase stock first.')
+      return
+    }
     const product = mockProducts.find((p) => p.id === productId)
     const latestPurchase = [...purchaseInvoices]
       .reverse()
@@ -256,13 +275,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   }
 
   const handleSaveInvoice = async () => {
-    const validItems = saleItems.filter((item) => {
-      const quantity = parseFloat(item.quantity || '0')
-      const sellingPrice = parseFloat(item.sellingPrice || '0')
-      return item.selectedProduct && quantity > 0 && sellingPrice > 0
-    })
-    
-    // Validation with debugging
     if (!selectedCustomerId) {
       toast.error('Please select a customer name')
       return
@@ -275,10 +287,60 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       toast.error('Please select a sale date')
       return
     }
-    if (validItems.length === 0) {
-      toast.error('Please add at least one product with quantity and selling price greater than 0')
+    if (saleItems.length === 0) {
+      toast.error('Please add at least one product')
       return
     }
+
+    // Strict per-item validation. Quantity is mandatory and stock-limited.
+    const requestedByProduct = new Map<string, number>()
+    for (let i = 0; i < saleItems.length; i++) {
+      const item = saleItems[i]
+      const label = `Item ${i + 1}`
+      if (!item.selectedProduct) {
+        toast.error(`${label}: Please select a product.`)
+        return
+      }
+      const qtyRaw = String(item.quantity ?? '').trim()
+      if (qtyRaw === '') {
+        toast.error(`${label}: Quantity is required.`)
+        return
+      }
+      const qty = Number(qtyRaw)
+      if (!Number.isFinite(qty) || qty <= 0) {
+        toast.error(`${label}: Quantity must be greater than 0.`)
+        return
+      }
+      const price = Number(String(item.sellingPrice ?? '').trim())
+      if (!Number.isFinite(price) || price <= 0) {
+        toast.error(`${label}: Selling price must be greater than 0.`)
+        return
+      }
+      requestedByProduct.set(
+        item.selectedProduct,
+        (requestedByProduct.get(item.selectedProduct) || 0) + qty,
+      )
+    }
+
+    // Stock check — cannot sell more than what was purchased.
+    for (const [productId, requested] of requestedByProduct) {
+      const available = availableStock(productId)
+      const product = mockProducts.find((p) => p.id === productId)
+      const name = product?.name || 'this product'
+      const unit = product?.unit || ''
+      if (available <= 0) {
+        toast.error(`No stock available for ${name}. Please add purchase stock first.`)
+        return
+      }
+      if (requested > available) {
+        toast.error(
+          `Only ${available} ${unit} available for ${name}. You cannot sell more than available stock.`,
+        )
+        return
+      }
+    }
+
+    const validItems = saleItems
 
     const total = validItems.reduce((sum, item) => sum + getRowTotal(item), 0)
     const firstProduct = mockProducts.find((p) => p.id === validItems[0].selectedProduct)
@@ -475,7 +537,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                   <tr>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Name</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Type</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity</th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Selling Price</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tally Price</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Unit</th>
@@ -504,6 +566,20 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                               </option>
                             ))}
                           </select>
+                          {item.selectedProduct && (() => {
+                            const avail = availableStock(item.selectedProduct)
+                            const unit =
+                              mockProducts.find((p) => p.id === item.selectedProduct)?.unit || ''
+                            return avail > 0 ? (
+                              <div className="mt-1 text-[10px] font-medium text-green-700">
+                                Available Stock: {avail} {unit}
+                              </div>
+                            ) : (
+                              <div className="mt-1 text-[10px] font-medium text-red-600">
+                                No stock available for this product.
+                              </div>
+                            )
+                          })()}
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
                           <select 
@@ -527,6 +603,12 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                             placeholder="0"
                             className="w-16 text-center border border-gray-400 rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1"
                           />
+                          {item.selectedProduct &&
+                            Number(item.quantity || 0) > availableStock(item.selectedProduct) && (
+                              <div className="mt-1 text-[10px] font-medium text-red-600">
+                                Only {availableStock(item.selectedProduct)} available
+                              </div>
+                            )}
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
                           <input
