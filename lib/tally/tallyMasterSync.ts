@@ -79,7 +79,10 @@ async function messagesForMaster(
     const name = r.tally_stock_item_name || r.name
     return {
       label: `Product: ${name}`,
-      messages: [unitMessage(unit), stockItemMessage(name, unit)],
+      messages: [
+        unitMessage(unit),
+        stockItemMessage(name, unit, { hsn: r.hsn_code, gstRate: Number(r.gst_rate) }),
+      ],
     }
   }
   const r = await queryOne<any>('SELECT * FROM product_types WHERE id = ?', [id])
@@ -192,7 +195,13 @@ export async function ensureMastersForVoucher(opts: {
   kind: 'purchase' | 'sales'
   partyName: string
   partyGstin?: string
-  items: Array<{ productName: string; unit: string; ledgerName: string }>
+  items: Array<{
+    productName: string
+    unit: string
+    ledgerName: string
+    hsn?: string
+    gstRate?: number
+  }>
 }): Promise<void> {
   const messages: string[] = []
   if (opts.partyName) {
@@ -215,7 +224,7 @@ export async function ensureMastersForVoucher(opts: {
     }
     if (it.productName && !stock.has(it.productName)) {
       stock.add(it.productName)
-      messages.push(stockItemMessage(it.productName, unit))
+      messages.push(stockItemMessage(it.productName, unit, { hsn: it.hsn, gstRate: it.gstRate }))
     }
     if (it.ledgerName && !ledgers.has(it.ledgerName)) {
       ledgers.add(it.ledgerName)
@@ -226,8 +235,12 @@ export async function ensureMastersForVoucher(opts: {
   messages.push(...gstLedgerMessages())
   if (messages.length === 0) return
   try {
-    await postXml(buildMastersEnvelope(messages))
-  } catch {
+    const mastersXml = buildMastersEnvelope(messages)
+    console.log('[FarmStack→Tally] Masters XML sent:\n' + mastersXml)
+    const mastersResp = await postXml(mastersXml)
+    console.log('[Tally] Masters response:\n' + mastersResp)
+  } catch (err) {
     // best effort — the voucher post will surface the real problem
+    console.log('[Tally] Masters sync error:', (err as Error).message)
   }
 }

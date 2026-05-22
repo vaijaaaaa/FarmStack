@@ -68,6 +68,15 @@ async function productName(productId: string): Promise<string> {
   return row?.name || ''
 }
 
+async function productHsn(productId: string): Promise<string> {
+  if (!productId) return ''
+  const row = await queryOne<{ hsn_code: string }>(
+    'SELECT hsn_code FROM products WHERE id = ?',
+    [productId],
+  )
+  return row?.hsn_code || ''
+}
+
 export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
   const inv = await queryOne<Record<string, any>>(
     'SELECT * FROM purchase_invoices WHERE id = ?',
@@ -122,11 +131,15 @@ export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
       kind: 'purchase',
       partyName: input.partyLedger,
       partyGstin: sup?.gstin,
-      items: voucherItems.map((it) => ({
-        productName: it.productName,
-        unit: it.unit,
-        ledgerName: it.ledgerName,
-      })),
+      items: await Promise.all(
+        voucherItems.map(async (it, i) => ({
+          productName: it.productName,
+          unit: it.unit,
+          ledgerName: it.ledgerName,
+          hsn: await productHsn(String(items[i]?.product_id || '')),
+          gstRate: it.taxPercent,
+        })),
+      ),
     })
     const xml = buildPurchaseVoucherXml(input)
     console.log('[FarmStack→Tally] Purchase voucher XML sent:\n' + xml)
@@ -256,11 +269,15 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
       kind: 'sales',
       partyName: input.partyLedger,
       partyGstin: cust?.gstin,
-      items: voucherItems.map((it) => ({
-        productName: it.productName,
-        unit: it.unit,
-        ledgerName: it.ledgerName,
-      })),
+      items: await Promise.all(
+        voucherItems.map(async (it, i) => ({
+          productName: it.productName,
+          unit: it.unit,
+          ledgerName: it.ledgerName,
+          hsn: await productHsn(String(items[i]?.product_id || '')),
+          gstRate: it.taxPercent,
+        })),
+      ),
     })
     const xml = buildSalesVoucherXml(input)
     const raw = await postXml(xml)

@@ -96,6 +96,7 @@ function inventoryEntry(it: VoucherItem, deemedPositive: boolean, signedAmount: 
           <ACTUALQTY>${qtyStr}</ACTUALQTY>
           <BILLEDQTY>${qtyStr}</BILLEDQTY>
           <BATCHALLOCATIONS.LIST>
+            <GODOWNNAME>Main Location</GODOWNNAME>
             <BATCHNAME>${esc(batchName)}</BATCHNAME>
             <AMOUNT>${money(signedAmount)}</AMOUNT>
             <ACTUALQTY>${qtyStr}</ACTUALQTY>
