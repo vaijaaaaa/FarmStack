@@ -16,6 +16,8 @@ interface PurchaseItemInput {
   type?: string
   tax?: number | string
   total_price?: number | string
+  batch?: string
+  unit?: string
 }
 
 // History is rendered as one row per item, so GET returns a flattened list.
@@ -43,7 +45,9 @@ export async function GET() {
               it.expiry_date    AS expiry_date,
               it.type           AS type,
               it.tax            AS tax,
-              it.total_price    AS total_price
+              it.total_price    AS total_price,
+              it.batch          AS batch,
+              it.unit           AS unit
        FROM purchase_items it
        JOIN purchase_invoices pi ON pi.id = it.invoice_id
        ORDER BY pi.created_at DESC`,
@@ -81,6 +85,7 @@ export async function POST(request: Request) {
       const quantity = Number(it.quantity ?? 0)
       const buyingPrice = Number(it.buying_price ?? 0)
       const tax = Number(it.tax ?? 0)
+      // Purchase line total = taxable amount (qty * buying price) + GST on it.
       const totalPrice =
         it.total_price != null
           ? Number(it.total_price)
@@ -97,6 +102,8 @@ export async function POST(request: Request) {
         type: String(it.type ?? ''),
         tax,
         total_price: totalPrice,
+        batch: String(it.batch ?? ''),
+        unit: String(it.unit ?? ''),
       }
     })
     for (let i = 0; i < builtItems.length; i++) {
@@ -111,9 +118,9 @@ export async function POST(request: Request) {
           { status: 400 },
         )
       }
-      if (!Number.isFinite(it.buying_price) || it.buying_price <= 0) {
+      if (!Number.isFinite(it.buying_price) || it.buying_price < 0) {
         return NextResponse.json(
-          { error: `${label}: Buying price must be greater than 0.` },
+          { error: `${label}: Buying price is required and must be 0 or more.` },
           { status: 400 },
         )
       }
@@ -145,8 +152,8 @@ export async function POST(request: Request) {
         run(
           `INSERT INTO purchase_items
             (id, invoice_id, product_id, product_name, quantity, buying_price,
-             selling_price, tally_price, expiry_date, type, tax, total_price)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             selling_price, tally_price, expiry_date, type, tax, total_price, batch, unit)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             it.id,
             id,
@@ -160,6 +167,8 @@ export async function POST(request: Request) {
             it.type,
             it.tax,
             it.total_price,
+            it.batch,
+            it.unit,
           ],
         )
       }

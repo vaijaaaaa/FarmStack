@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS sales_invoices (
   customer_name TEXT DEFAULT '',
   tally_name TEXT DEFAULT '',
   date TEXT DEFAULT '',
+  sale_type TEXT DEFAULT 'cash',
   total REAL DEFAULT 0,
   status TEXT DEFAULT 'saved',
   eway_bill_no TEXT,
@@ -104,7 +105,8 @@ CREATE TABLE IF NOT EXISTS sales_items (
   rate REAL DEFAULT 0,
   tally_price REAL DEFAULT 0,
   gst REAL DEFAULT 0,
-  type TEXT DEFAULT ''
+  type TEXT DEFAULT '',
+  unit TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS purchase_invoices (
@@ -136,7 +138,9 @@ CREATE TABLE IF NOT EXISTS purchase_items (
   expiry_date TEXT DEFAULT '',
   type TEXT DEFAULT '',
   tax REAL DEFAULT 0,
-  total_price REAL DEFAULT 0
+  total_price REAL DEFAULT 0,
+  batch TEXT DEFAULT '',
+  unit TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_sales_items_invoice ON sales_items(invoice_id);
@@ -187,6 +191,10 @@ function applySchema(db: any): void {
     for (const [col, def] of tallyColumns) ensureColumn(db, table, col, def)
   }
   ensureColumn(db, 'sales_items', 'type', "TEXT DEFAULT ''")
+  ensureColumn(db, 'sales_items', 'unit', "TEXT DEFAULT ''")
+  ensureColumn(db, 'sales_invoices', 'sale_type', "TEXT DEFAULT 'cash'")
+  ensureColumn(db, 'purchase_items', 'batch', "TEXT DEFAULT ''")
+  ensureColumn(db, 'purchase_items', 'unit', "TEXT DEFAULT ''")
   ensureColumn(db, 'suppliers', 'country', "TEXT DEFAULT ''")
   ensureColumn(db, 'suppliers', 'place_of_supply', "TEXT DEFAULT ''")
   const masterTallyColumns: Array<[string, string]> = [

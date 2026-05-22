@@ -77,6 +77,20 @@ async function productHsn(productId: string): Promise<string> {
   return row?.hsn_code || ''
 }
 
+// 'interstate' => IGST; anything else (incl. blank/exempted) => local CGST+SGST.
+async function productGstSupplyType(
+  productId: string,
+): Promise<'local' | 'interstate'> {
+  if (!productId) return 'local'
+  const row = await queryOne<{ gst_supply_type: string }>(
+    'SELECT gst_supply_type FROM products WHERE id = ?',
+    [productId],
+  )
+  return String(row?.gst_supply_type || '').toLowerCase() === 'interstate'
+    ? 'interstate'
+    : 'local'
+}
+
 export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
   const inv = await queryOne<Record<string, any>>(
     'SELECT * FROM purchase_invoices WHERE id = ?',
@@ -91,7 +105,9 @@ export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
 
   const voucherItems: VoucherItem[] = []
   for (const it of items) {
-    const unit = (await productUnit(String(it.product_id))) || ''
+    const pid = String(it.product_id)
+    // Taxable amount for a purchase line is quantity * buying price.
+    const unit = (await productUnit(pid)) || ''
     voucherItems.push({
       productName: String(it.product_name || ''),
       unit,
@@ -100,6 +116,7 @@ export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
       baseAmount: Number(it.quantity || 0) * Number(it.buying_price || 0),
       ledgerName: String(it.type || ''),
       taxPercent: Number(it.tax || 0),
+      gstSupplyType: await productGstSupplyType(pid),
       batch: it.batch ? String(it.batch) : undefined,
       expiryDate: it.expiry_date ? String(it.expiry_date) : undefined,
     })
@@ -223,8 +240,9 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
 
   const voucherItems: VoucherItem[] = []
   for (const it of items) {
-    const name = (await productName(String(it.product_id))) || ''
-    const unit = (await productUnit(String(it.product_id))) || ''
+    const pid = String(it.product_id)
+    const name = (await productName(pid)) || ''
+    const unit = String(it.unit || '') || (await productUnit(pid)) || ''
     voucherItems.push({
       productName: name,
       unit,
@@ -233,6 +251,7 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
       baseAmount: Number(it.quantity || 0) * Number(it.rate || 0),
       ledgerName: String(it.type || ''),
       taxPercent: Number(it.gst || 0),
+      gstSupplyType: await productGstSupplyType(pid),
       batch: it.batch ? String(it.batch) : undefined,
     })
   }

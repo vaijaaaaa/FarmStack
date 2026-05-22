@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Language, SalesInvoice } from '@/types/farmstack'
+import { Language, SaleType } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { useCustomers, useProducts, useProductTypes, usePurchaseInvoices, useSalesInvoices } from '@/hooks/useDatabase'
 import { toast } from 'sonner'
@@ -17,29 +17,38 @@ interface SalesInvoiceModuleProps {
   language: Language
 }
 
-interface SaleItemRow {
+// One editable line = a product + total quantity the customer wants. The line
+// is automatically expanded batch-wise (FEFO) into the allocation rows below.
+interface SaleLine {
   selectedProduct: string
   quantity: string
-  sellingPrice: string
-  tallyPrice: string
-  unit: string
-  batch: string
-  tax: number
-  productType: string
   selectedSaleType: string
 }
 
-const createEmptySaleItem = (): SaleItemRow => ({
+const createEmptyLine = (): SaleLine => ({
   selectedProduct: '',
   quantity: '',
-  sellingPrice: '',
-  tallyPrice: '',
-  unit: '',
-  batch: '',
-  tax: 5,
-  productType: '',
   selectedSaleType: '',
 })
+
+// A stock batch available for a product (derived from purchase history).
+interface StockBatch {
+  batchName: string
+  available: number
+  sellingPrice: number
+  tallyPrice: number
+  unit: string
+  expiry: string
+}
+
+// One batch allocation produced from a line.
+interface AllocChunk {
+  batchName: string
+  qty: number
+  sellingPrice: number
+  tallyPrice: number
+  unit: string
+}
 
 export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps) {
   const t = (key: string) => getTranslation(language, key)
@@ -49,19 +58,25 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const { invoices: purchaseInvoices } = usePurchaseInvoices()
   const { productTypes, createProductType } = useProductTypes()
   const saleTypes = productTypes.filter((type) => type.name.toLowerCase().startsWith('sales'))
+
   const [showNewInvoice, setShowNewInvoice] = useState(false)
+  const [showSaleTypePopup, setShowSaleTypePopup] = useState(false)
+  const [saleType, setSaleType] = useState<SaleType>('cash')
+  const [historyTab, setHistoryTab] = useState<'all' | 'cash' | 'credit'>('all')
+
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedTallyName, setSelectedTallyName] = useState('')
   const [date, setDate] = useState(todayISO)
-  const [saleItems, setSaleItems] = useState<SaleItemRow[]>([createEmptySaleItem()])
+  const [saleLines, setSaleLines] = useState<SaleLine[]>([createEmptyLine()])
+
   const [showAddSaleTypeModal, setShowAddSaleTypeModal] = useState(false)
   const [newSaleTypeName, setNewSaleTypeName] = useState('')
   const [newSaleTypeGST, setNewSaleTypeGST] = useState('')
   const [currentTypeIndex, setCurrentTypeIndex] = useState<number | null>(null)
-  
-  // Additional details modal states (for invoices > 50k - Tally "Additional Details: Local Sales - Taxable")
+
+  // Additional details modal states (for invoices > 50k)
   const [showAdditionalDetailsModal, setShowAdditionalDetailsModal] = useState(false)
-  const [pendingInvoice, setPendingInvoice] = useState<SalesInvoice | null>(null)
+  const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null)
   const [ewayBillNo, setEwayBillNo] = useState('')
   const [ewayBillDate, setEwayBillDate] = useState('')
   const [dispatchFrom, setDispatchFrom] = useState('')
@@ -74,44 +89,100 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const [vehicleNumber, setVehicleNumber] = useState('')
   const [vehicleType, setVehicleType] = useState('')
 
-  const columns = [
-    { key: 'customer_name', label: 'Customer Name' },
-    { key: 'tally_name', label: 'Tally Name' },
-    { key: 'date', label: 'Date' },
-    { key: 'product_name', label: 'Product Name' },
-    { key: 'product_type', label: 'Type' },
-    { key: 'quantity', label: 'Quantity' },
-    { key: 'selling_price', label: 'Selling Price' },
-    { key: 'tally_price', label: 'Tally Price' },
-    { key: 'tax', label: 'Tax%' },
-    { key: 'total', label: 'Total' },
-    { key: 'tally', label: 'Tally Status' },
-  ]
+  // ----- Stock / batch derivation (FEFO) ---------------------------------
+  // Batches available for a product, oldest-expiry first (empty expiry last).
+  const getBatchesForProduct = (productId: string): StockBatch[] => {
+    if (!productId) return []
+    const byBatch = new Map<string, StockBatch>()
+    for (const p of purchaseInvoices) {
+      if (String(p.product_id || '') !== productId) continue
+      const name = String(p.batch || '')
+      const cur =
+        byBatch.get(name) ||
+        {
+          batchName: name,
+          available: 0,
+          sellingPrice: Number(p.selling_price || 0),
+          tallyPrice: Number(p.tally_price || 0),
+          unit: String(p.unit || ''),
+          expiry: String(p.expiry_date || ''),
+        }
+      cur.available += Number(p.quantity || 0)
+      // Keep the most informative price/expiry seen for the batch.
+      if (p.selling_price) cur.sellingPrice = Number(p.selling_price)
+      if (p.tally_price) cur.tallyPrice = Number(p.tally_price)
+      if (p.unit) cur.unit = String(p.unit)
+      if (p.expiry_date) cur.expiry = String(p.expiry_date)
+      byBatch.set(name, cur)
+    }
+    // Subtract quantities already sold from each batch.
+    for (const inv of invoices) {
+      for (const it of inv.items || []) {
+        if (String(it.product_id || '') !== productId) continue
+        const name = String(it.batch || '')
+        const b = byBatch.get(name)
+        if (b) b.available -= Number(it.quantity || 0)
+      }
+    }
+    return [...byBatch.values()]
+      .filter((b) => b.available > 0.0001)
+      .sort((a, b) => {
+        if (!a.expiry && !b.expiry) return 0
+        if (!a.expiry) return 1 // empty expiry last
+        if (!b.expiry) return -1
+        return a.expiry.localeCompare(b.expiry)
+      })
+  }
 
-  // A product only belongs in Tally if it was purchased with Tally sync on.
-  // Sales of products that were intentionally NOT synced at purchase are not
-  // Tally-relevant, so they show no Tally status/retry at all.
+  const availableStock = (productId: string) =>
+    getBatchesForProduct(productId).reduce((s, b) => s + b.available, 0)
+
+  // Allocate a requested quantity across FEFO batches.
+  const allocate = (productId: string, qty: number): { chunks: AllocChunk[]; shortfall: number } => {
+    const batches = getBatchesForProduct(productId)
+    const chunks: AllocChunk[] = []
+    let remaining = qty
+    for (const b of batches) {
+      if (remaining <= 0.0001) break
+      const take = Math.min(remaining, b.available)
+      chunks.push({
+        batchName: b.batchName,
+        qty: take,
+        sellingPrice: b.sellingPrice,
+        tallyPrice: b.tallyPrice,
+        unit: b.unit,
+      })
+      remaining -= take
+    }
+    return { chunks, shortfall: Math.max(0, remaining) }
+  }
+
+  const productGst = (productId: string) =>
+    Number(mockProducts.find((p) => p.id === productId)?.gst_rate ?? 0)
+
+  // ----- Sales history ----------------------------------------------------
   const tallySyncedProductIds = new Set(
-    purchaseInvoices
-      .filter((p) => p.tally_sync_status === 'synced')
-      .map((p) => p.product_id),
+    purchaseInvoices.filter((p) => p.tally_sync_status === 'synced').map((p) => p.product_id),
   )
 
-  // Available stock per product = total purchased - total sold (saved sales).
-  const stockByProduct = new Map<string, number>()
-  for (const p of purchaseInvoices) {
-    const pid = String(p.product_id || '')
-    if (pid) stockByProduct.set(pid, (stockByProduct.get(pid) || 0) + Number(p.quantity || 0))
-  }
-  for (const inv of invoices) {
-    for (const it of inv.items || []) {
-      const pid = String(it.product_id || '')
-      if (pid) stockByProduct.set(pid, (stockByProduct.get(pid) || 0) - Number(it.quantity || 0))
-    }
-  }
-  const availableStock = (productId: string) => stockByProduct.get(productId) ?? 0
+  const columns = [
+    { key: 'customer_name', label: 'Customer' },
+    { key: 'sale_type', label: 'Sale Type' },
+    { key: 'date', label: 'Date' },
+    { key: 'product_name', label: 'Product' },
+    { key: 'batch', label: 'Batch' },
+    { key: 'quantity', label: 'Qty' },
+    { key: 'selling_price', label: 'Selling' },
+    { key: 'tax', label: 'Tax%' },
+    { key: 'total', label: 'Total' },
+    { key: 'tally', label: 'Status' },
+  ]
 
-  const tableData = invoices.flatMap((invoice) => {
+  const visibleInvoices = invoices.filter(
+    (inv) => historyTab === 'all' || (inv.sale_type || 'cash') === historyTab,
+  )
+
+  const tableData = visibleInvoices.flatMap((invoice) => {
     const customer = mockCustomers.find((c) => c.id === invoice.customer_id)
     const invoiceDate = invoice.date || new Date(invoice.created_at).toISOString().split('T')[0]
     const tallyEligible =
@@ -120,17 +191,15 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
 
     return invoice.items.map((item) => {
       const product = mockProducts.find((p) => p.id === item.product_id)
-      const itemTotal = (item.quantity * item.rate) * (1 + item.gst / 100)
-
+      const itemTotal = item.quantity * item.rate * (1 + item.gst / 100)
       return {
         customer_name: invoice.customer_name || customer?.name || 'N/A',
-        tally_name: invoice.tally_name || customer?.tally_ledger_name || 'N/A',
+        sale_type: (invoice.sale_type || 'cash') === 'credit' ? 'Credit Sale' : 'Cash Sale',
         date: invoiceDate,
         product_name: product?.name || invoice.product_name || 'N/A',
-        product_type: product?.product_type || 'N/A',
-        quantity: item.quantity,
+        batch: item.batch || '—',
+        quantity: item.unit ? `${item.quantity} ${item.unit}` : item.quantity,
         selling_price: `Rs.${item.rate}`,
-        tally_price: `Rs.${item.tally_price}`,
         tax: `${item.gst}%`,
         total: `Rs.${itemTotal.toFixed(2)}`,
         tally: tallyEligible ? (
@@ -150,50 +219,49 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     })
   })
 
-  const handleUpdateItem = (index: number, field: keyof SaleItemRow, value: string | number) => {
-    const updated = [...saleItems]
-    updated[index] = { ...updated[index], [field]: value }
-    setSaleItems(updated)
+  // ----- Form handlers ----------------------------------------------------
+  const openCreateSale = () => {
+    if (showNewInvoice) {
+      setShowNewInvoice(false)
+      return
+    }
+    setShowSaleTypePopup(true)
   }
 
-  const handleProductSelectChange = (index: number, productId: string) => {
-    // Block products that have no purchase stock — they cannot be sold.
+  const startSale = (type: SaleType) => {
+    setSaleType(type)
+    setShowSaleTypePopup(false)
+    setShowNewInvoice(true)
+    setSaleLines([createEmptyLine()])
+    setSelectedCustomerId('')
+    setSelectedTallyName('')
+    setDate(todayISO())
+  }
+
+  const updateLine = (index: number, field: keyof SaleLine, value: string) => {
+    const updated = [...saleLines]
+    updated[index] = { ...updated[index], [field]: value }
+    setSaleLines(updated)
+  }
+
+  const handleProductSelect = (index: number, productId: string) => {
     if (productId && availableStock(productId) <= 0) {
       toast.error('No stock available for this product. Please add purchase stock first.')
       return
     }
     const product = mockProducts.find((p) => p.id === productId)
-    const latestPurchase = [...purchaseInvoices]
-      .reverse()
-      .find((invoice) => invoice.product_id === productId)
-    const sellingPrice = latestPurchase?.selling_price ? String(latestPurchase.selling_price) : ''
-    const tallyPrice = latestPurchase?.tally_price ? String(latestPurchase.tally_price) : ''
-    const existingBatch = invoices
-      .flatMap((invoice) => invoice.items)
-      .find((item) => item.product_id === productId)?.batch
-    const batch = existingBatch || (product ? `BATCH-${product.id.padStart(3, '0')}` : '')
-
     const productType = product?.product_type?.toLowerCase()
-    const matchedSaleType = saleTypes.find((type) => {
-      const typeName = type.name.toLowerCase()
-      return typeName === productType || (!!productType && typeName.includes(productType))
+    const matched = saleTypes.find((s) => {
+      const n = s.name.toLowerCase()
+      return n === productType || (!!productType && n.includes(productType))
     })
-    const saleType = matchedSaleType || saleTypes[0]
-    const gstRate = product?.gst_rate ?? saleType?.tax ?? 5
-
-    const updated = [...saleItems]
+    const updated = [...saleLines]
     updated[index] = {
       ...updated[index],
       selectedProduct: productId,
-      sellingPrice,
-      tallyPrice,
-      unit: product?.unit || '',
-      batch,
-      tax: gstRate,
-      productType: product?.product_type || '',
-      selectedSaleType: saleType?.id || '',
+      selectedSaleType: matched?.id || saleTypes[0]?.id || '',
     }
-    setSaleItems(updated)
+    setSaleLines(updated)
   }
 
   const handleSaleTypeChange = (index: number, saleTypeId: string) => {
@@ -204,45 +272,27 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       setShowAddSaleTypeModal(true)
       return
     }
-
-    const saleType = saleTypes.find(st => st.id === saleTypeId)
-    const updated = [...saleItems]
-    updated[index] = {
-      ...updated[index],
-      selectedSaleType: saleTypeId,
-      tax: saleType?.tax ?? 5,
-    }
-    setSaleItems(updated)
+    updateLine(index, 'selectedSaleType', saleTypeId)
   }
 
   const handleSaveNewSaleType = async () => {
     const typeName = newSaleTypeName.trim()
-    const typeGST = parseInt(newSaleTypeGST) || 0
-    if (!typeName || isNaN(typeGST)) {
-      toast.error('Please enter type name and GST percentage')
+    if (!typeName) {
+      toast.error('Please enter a type name')
       return
     }
-
     try {
-      const normalizedTypeName = typeName.toLowerCase().startsWith('sales')
+      const normalized = typeName.toLowerCase().startsWith('sales')
         ? typeName
         : `Sales of ${typeName}`
       const newType = await createProductType({
-        name: normalizedTypeName,
+        name: normalized,
         description: 'Added from Sales Invoice',
-        tax: typeGST,
+        tax: parseInt(newSaleTypeGST) || 0,
       })
-
       if (currentTypeIndex !== null) {
-        const updated = [...saleItems]
-        updated[currentTypeIndex] = {
-          ...updated[currentTypeIndex],
-          selectedSaleType: newType.id,
-          tax: typeGST,
-        }
-        setSaleItems(updated)
+        updateLine(currentTypeIndex, 'selectedSaleType', newType.id)
       }
-
       setShowAddSaleTypeModal(false)
       setCurrentTypeIndex(null)
       setNewSaleTypeName('')
@@ -252,167 +302,135 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     }
   }
 
-  const handleAddRow = () => {
-    setSaleItems([...saleItems, createEmptySaleItem()])
+  const handleAddRow = () => setSaleLines([...saleLines, createEmptyLine()])
+  const handleRemoveRow = (i: number) => setSaleLines(saleLines.filter((_, idx) => idx !== i))
+
+  const resetAdditionalDetailsForm = () => {
+    setEwayBillNo('')
+    setEwayBillDate('')
+    setDispatchFrom('')
+    setShipTo('')
+    setTransportMode('')
+    setTransporterName('')
+    setTransporterId('')
+    setTransportDocNo('')
+    setTransportDocDate('')
+    setVehicleNumber('')
+    setVehicleType('')
   }
 
-  const handleRemoveRow = (indexToRemove: number) => {
-    setSaleItems(saleItems.filter((_, index) => index !== indexToRemove))
-  }
-
-  const getRowTotal = (item: SaleItemRow) => {
-    const quantity = parseFloat(item.quantity || '0')
-    const sellingPrice = parseFloat(item.sellingPrice || '0')
-    const subtotal = quantity * sellingPrice
-    const taxAmount = (subtotal * item.tax) / 100
-    return subtotal + taxAmount
-  }
-
-  const handleCustomerNameChange = (customerId: string) => {
-    setSelectedCustomerId(customerId)
-    const customer = mockCustomers.find((c) => c.id === customerId)
-    if (customer) {
-      setSelectedTallyName(customer.tally_ledger_name || customer.name)
-    }
-  }
-
-  const handleTallyNameChange = (tallyName: string) => {
-    setSelectedTallyName(tallyName)
-  }
-
-  const handleSaveInvoice = async () => {
+  const buildPayload = (): Record<string, unknown> | null => {
     if (!selectedCustomerId) {
       toast.error('Please select a customer name')
-      return
+      return null
     }
     if (!selectedTallyName) {
       toast.error('Please select a Tally name')
-      return
+      return null
     }
     if (!date) {
       toast.error('Please select a sale date')
-      return
+      return null
     }
-    if (saleItems.length === 0) {
+    if (saleLines.length === 0) {
       toast.error('Please add at least one product')
-      return
+      return null
     }
 
-    // Strict per-item validation. Quantity is mandatory and stock-limited.
-    const requestedByProduct = new Map<string, number>()
-    for (let i = 0; i < saleItems.length; i++) {
-      const item = saleItems[i]
+    const items: Array<Record<string, unknown>> = []
+    let total = 0
+    for (let i = 0; i < saleLines.length; i++) {
+      const line = saleLines[i]
       const label = `Item ${i + 1}`
-      if (!item.selectedProduct) {
+      if (!line.selectedProduct) {
         toast.error(`${label}: Please select a product.`)
-        return
+        return null
       }
-      const qtyRaw = String(item.quantity ?? '').trim()
-      if (qtyRaw === '') {
-        toast.error(`${label}: Quantity is required.`)
-        return
-      }
-      const qty = Number(qtyRaw)
+      const qty = Number(String(line.quantity ?? '').trim())
       if (!Number.isFinite(qty) || qty <= 0) {
-        toast.error(`${label}: Quantity must be greater than 0.`)
-        return
+        toast.error(`${label}: Quantity is required and must be greater than 0.`)
+        return null
       }
-      const price = Number(String(item.sellingPrice ?? '').trim())
-      if (!Number.isFinite(price) || price <= 0) {
-        toast.error(`${label}: Selling price must be greater than 0.`)
-        return
-      }
-      requestedByProduct.set(
-        item.selectedProduct,
-        (requestedByProduct.get(item.selectedProduct) || 0) + qty,
-      )
-    }
-
-    // Stock check — cannot sell more than what was purchased.
-    for (const [productId, requested] of requestedByProduct) {
-      const available = availableStock(productId)
-      const product = mockProducts.find((p) => p.id === productId)
+      const { chunks, shortfall } = allocate(line.selectedProduct, qty)
+      const product = mockProducts.find((p) => p.id === line.selectedProduct)
       const name = product?.name || 'this product'
       const unit = product?.unit || ''
-      if (available <= 0) {
-        toast.error(`No stock available for ${name}. Please add purchase stock first.`)
-        return
+      if (shortfall > 0.0001) {
+        const avail = availableStock(line.selectedProduct)
+        toast.error(`Only ${avail} ${unit} available for ${name}.`)
+        return null
       }
-      if (requested > available) {
-        toast.error(
-          `Only ${available} ${unit} available for ${name}. You cannot sell more than available stock.`,
-        )
-        return
+      const gst = productGst(line.selectedProduct)
+      const ledgerName = saleTypes.find((s) => s.id === line.selectedSaleType)?.name || ''
+      for (const c of chunks) {
+        const lineTotal = c.qty * c.sellingPrice * (1 + gst / 100)
+        total += lineTotal
+        items.push({
+          product_id: line.selectedProduct,
+          batch: c.batchName,
+          quantity: c.qty,
+          rate: c.sellingPrice,
+          tally_price: c.tallyPrice,
+          gst,
+          type: ledgerName,
+          unit: c.unit || unit,
+        })
       }
     }
 
-    const validItems = saleItems
-
-    const total = validItems.reduce((sum, item) => sum + getRowTotal(item), 0)
-    const firstProduct = mockProducts.find((p) => p.id === validItems[0].selectedProduct)
-    const selectedCustomer = mockCustomers.find((c) => c.id === selectedCustomerId)
-
-    const newInvoice: SalesInvoice = {
-      id: String(invoices.length + 1),
-      invoice_number: `INV-${String(invoices.length + 1).padStart(3, '0')}`,
+    const customer = mockCustomers.find((c) => c.id === selectedCustomerId)
+    return {
       customer_id: selectedCustomerId,
-      customer_name: selectedCustomer?.name || '',
+      customer_name: customer?.name || '',
       tally_name: selectedTallyName,
       date,
-      product_name: firstProduct?.name || '',
-      items: validItems.map((item, index) => ({
-        id: String(index + 1),
-        product_id: item.selectedProduct,
-        batch: item.batch,
-        quantity: parseFloat(item.quantity || '0'),
-        rate: parseFloat(item.sellingPrice || '0'),
-        tally_price: parseFloat(item.tallyPrice || item.sellingPrice || '0'),
-        gst: item.tax,
-        type: saleTypes.find((st) => st.id === item.selectedSaleType)?.name || '',
-      })),
-      quantity: parseFloat(validItems[0].quantity || '0'),
-      selling_price: parseFloat(validItems[0].sellingPrice || '0'),
-      total,
+      sale_type: saleType,
       status: 'saved',
-      created_at: new Date().toISOString(),
+      items,
+      total,
     }
+  }
 
-    // Check if total > 50000 and show additional details modal
-    if (total > 50000) {
-      setPendingInvoice(newInvoice)
-      setShowAdditionalDetailsModal(true)
-      setEwayBillNo('')
-      setEwayBillDate('')
-      setDispatchFrom('')
-      setShipTo('')
-      setTransportMode('')
-      setTransporterName('')
-      setTransporterId('')
-      setTransportDocNo('')
-      setTransportDocDate('')
-      setVehicleNumber('')
-      setVehicleType('')
-      return
-    }
-
-    // If total <= 50000, save directly
+  const submit = async (payload: Record<string, unknown>) => {
     try {
-      await createInvoice(newInvoice)
+      const result: any = await createInvoice(payload as never)
       setShowNewInvoice(false)
-      setSaleItems([createEmptySaleItem()])
+      setSaleLines([createEmptyLine()])
       setSelectedCustomerId('')
       setSelectedTallyName('')
       setDate(todayISO())
-      toast.success('Sale Invoice saved successfully!')
+      // Tally sync happens automatically for products that were purchased with
+      // Tally sync on; result.tally is present only when a sync was attempted.
+      if (result?.tally) {
+        if (result.tally.status === 'synced') {
+          toast.success('Sale saved and synced to Tally successfully!')
+        } else {
+          toast.error(`Tally sync ${result.tally.status} — sale saved locally`, {
+            description: result.tally.message,
+          })
+        }
+      } else {
+        toast.success('Sale Invoice saved successfully!')
+      }
     } catch (err) {
       toast.error(`Failed to save invoice: ${(err as Error).message}`)
     }
   }
 
-  const handleSaveWithAdditionalDetails = async () => {
-    if (!pendingInvoice) return
+  const handleSaveInvoice = async () => {
+    const payload = buildPayload()
+    if (!payload) return
+    if (Number(payload.total) > 50000) {
+      setPendingPayload(payload)
+      resetAdditionalDetailsForm()
+      setShowAdditionalDetailsModal(true)
+      return
+    }
+    await submit(payload)
+  }
 
-    // Validate conditional required fields
+  const handleSaveWithAdditionalDetails = async () => {
+    if (!pendingPayload) return
     if (ewayBillNo && !ewayBillDate) {
       toast.error('e-Way Bill Date is required when e-Way Bill No is provided')
       return
@@ -429,10 +447,8 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       toast.error('Vehicle Type is required for road transport')
       return
     }
-
-    // Add additional details to the invoice with defaults
-    const invoiceWithDetails: SalesInvoice = {
-      ...pendingInvoice,
+    await submit({
+      ...pendingPayload,
       eway_bill_no: ewayBillNo || undefined,
       eway_bill_date: ewayBillDate || undefined,
       dispatch_from: dispatchFrom || undefined,
@@ -444,55 +460,71 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       transport_doc_date: transportDocDate || undefined,
       vehicle_number: vehicleNumber || undefined,
       vehicle_type: vehicleType || 'Not Applicable',
-    }
-
-    try {
-      await createInvoice(invoiceWithDetails)
-      setShowNewInvoice(false)
-      setSaleItems([createEmptySaleItem()])
-      setSelectedCustomerId('')
-      setSelectedTallyName('')
-      setDate(todayISO())
-      setShowAdditionalDetailsModal(false)
-      setPendingInvoice(null)
-      resetAdditionalDetailsForm()
-      toast.success('Sale Invoice saved successfully!')
-    } catch (err) {
-      toast.error(`Failed to save invoice: ${(err as Error).message}`)
-    }
-  }
-
-  const resetAdditionalDetailsForm = () => {
-    setEwayBillNo('')
-    setEwayBillDate('')
-    setDispatchFrom('')
-    setShipTo('')
-    setTransportMode('')
-    setTransporterName('')
-    setTransporterId('')
-    setTransportDocNo('')
-    setTransportDocDate('')
-    setVehicleNumber('')
-    setVehicleType('')
+    })
+    setShowAdditionalDetailsModal(false)
+    setPendingPayload(null)
+    resetAdditionalDetailsForm()
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-black">{t('sales_invoice')}</h2>
-        <Button
-          onClick={() => setShowNewInvoice(!showNewInvoice)}
-          className="bg-black text-white hover:bg-gray-900"
-        >
+        <Button onClick={openCreateSale} className="bg-black text-white hover:bg-gray-900">
           {showNewInvoice ? 'Cancel' : 'Create Sale'}
         </Button>
       </div>
 
+      {/* Cash / Credit sale-type popup */}
+      {showSaleTypePopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+          <div className="w-full max-w-sm rounded-lg border border-gray-300 bg-white p-6">
+            <h3 className="mb-1 text-lg font-bold text-black">Select Sale Type</h3>
+            <p className="mb-5 text-sm text-gray-600">
+              Choose how this sale was settled. Both open the same sales form.
+            </p>
+            <div className="flex gap-4">
+              <button
+                onClick={() => startSale('cash')}
+                className="flex-1 rounded-lg border-2 border-green-500 bg-green-50 px-4 py-4 font-semibold text-green-700 hover:bg-green-100"
+              >
+                Cash Sale
+              </button>
+              <button
+                onClick={() => startSale('credit')}
+                className="flex-1 rounded-lg border-2 border-blue-500 bg-blue-50 px-4 py-4 font-semibold text-blue-700 hover:bg-blue-100"
+              >
+                Credit Sale
+              </button>
+            </div>
+            <div className="mt-5 text-right">
+              <button
+                onClick={() => setShowSaleTypePopup(false)}
+                className="rounded-md bg-gray-200 px-4 py-2 text-sm text-gray-800 hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showNewInvoice && (
         <div data-kbd-scope className="rounded-lg bg-white p-2 shadow-sm border border-gray-200">
           <div className="p-6">
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-xl font-bold text-black">New Sale</h3>
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-xl font-bold text-black">New Sale</h3>
+                <span
+                  className={`mt-1 inline-block rounded-full px-3 py-0.5 text-xs font-semibold ${
+                    saleType === 'credit'
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-green-100 text-green-700'
+                  }`}
+                >
+                  {saleType === 'credit' ? 'Credit Sale' : 'Cash Sale'}
+                </span>
+              </div>
               <div className="flex flex-col items-end gap-3">
                 <Button onClick={handleAddRow} className="bg-blue-500 hover:bg-blue-600 text-white text-sm h-8 rounded-md px-4">
                   Add new Sale
@@ -509,171 +541,191 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               </div>
             </div>
 
-            <div className="flex justify-center gap-12 mb-8">
-              <select
-                value={selectedCustomerId}
-                onChange={(e) => handleCustomerNameChange(e.target.value)}
-                className="w-72 rounded-md border border-gray-400 px-4 py-2 text-center text-gray-700 bg-gray-50 focus:outline-none"
-              >
-                <option value="">Select Customer Name</option>
-                {mockCustomers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name}
-                  </option>
-                ))}
-              </select>
+            <div className="space-y-4">
+              {saleLines.map((line, index) => {
+                const productId = line.selectedProduct
+                const qtyNum = Number(line.quantity || 0)
+                const { chunks, shortfall } = productId
+                  ? allocate(productId, qtyNum)
+                  : { chunks: [] as AllocChunk[], shortfall: 0 }
+                const gst = productGst(productId)
+                const unit = mockProducts.find((p) => p.id === productId)?.unit || ''
+                const avail = productId ? availableStock(productId) : 0
 
-              <select
-                value={selectedTallyName}
-                onChange={(e) => handleTallyNameChange(e.target.value)}
-                className="w-72 rounded-md border border-gray-400 px-4 py-2 text-center text-gray-700 bg-gray-50 focus:outline-none"
-              >
-                <option value="">Select Tally Name</option>
-                {mockCustomers.map((customer) => (
-                  <option key={customer.id} value={customer.tally_ledger_name || customer.name}>
-                    {customer.tally_ledger_name || customer.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="w-full overflow-x-auto border border-gray-300 rounded-lg">
-              <table className="w-full text-sm text-center">
-                <thead className="bg-[#e0e0e0] text-gray-800 border-b border-gray-300">
-                  <tr>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Name</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Type</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity <span className="text-red-500">*</span></th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Selling Price</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tally Price</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Unit</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Batch</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tax%</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Total</th>
-                    <th className="py-3 px-2 font-semibold whitespace-nowrap"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {saleItems.map((item, index) => {
-                    const itemTotal = getRowTotal(item)
-
-                    return (
-                      <tr key={index} className="border-b border-gray-300 bg-[#ebebeb]">
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <select
-                            value={item.selectedProduct}
-                            onChange={(e) => handleProductSelectChange(index, e.target.value)}
-                            className="w-full border border-gray-400 rounded p-1 bg-white text-xs"
-                          >
-                            <option value="">Select a Product</option>
-                            {mockProducts.map((product) => (
-                              <option key={product.id} value={product.id}>
-                                {product.name}
-                              </option>
-                            ))}
-                          </select>
-                          {item.selectedProduct && (() => {
-                            const avail = availableStock(item.selectedProduct)
-                            const unit =
-                              mockProducts.find((p) => p.id === item.selectedProduct)?.unit || ''
-                            return avail > 0 ? (
-                              <div className="mt-1 text-[10px] font-medium text-green-700">
-                                Available Stock: {avail} {unit}
-                              </div>
-                            ) : (
-                              <div className="mt-1 text-[10px] font-medium text-red-600">
-                                No stock available for this product.
-                              </div>
-                            )
-                          })()}
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <select 
-                            value={item.selectedSaleType}
-                            onChange={(e) => handleSaleTypeChange(index, e.target.value)}
-                            className="w-full bg-white border border-gray-400 rounded p-1 text-xs focus:outline-none"
-                          >
-                            {saleTypes.map((saleType) => (
-                              <option key={saleType.id} value={saleType.id}>
-                                {saleType.name} ({saleType.tax}%)
-                              </option>
-                            ))}
-                            <option value="add-type" className="text-green-600 font-semibold">+ Add New Type</option>
-                          </select>
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <input
-                            type="number"
-                            value={item.quantity}
-                            onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
-                            placeholder="0"
-                            className="w-16 text-center border border-gray-400 rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1"
-                          />
-                          {item.selectedProduct &&
-                            Number(item.quantity || 0) > availableStock(item.selectedProduct) && (
-                              <div className="mt-1 text-[10px] font-medium text-red-600">
-                                Only {availableStock(item.selectedProduct)} available
-                              </div>
-                            )}
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <input
-                            type="number"
-                            value={item.sellingPrice}
-                            onChange={(e) => handleUpdateItem(index, 'sellingPrice', e.target.value)}
-                            placeholder="0.00"
-                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500"
-                          />
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <input
-                            type="number"
-                            value={item.tallyPrice}
-                            onChange={(e) => handleUpdateItem(index, 'tallyPrice', e.target.value)}
-                            placeholder="0.00"
-                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500"
-                          />
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <input
-                            type="text"
-                            value={item.unit}
-                            onChange={(e) => handleUpdateItem(index, 'unit', e.target.value)}
-                            placeholder="Unit"
-                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500"
-                          />
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <input
-                            type="text"
-                            value={item.batch}
-                            onChange={(e) => handleUpdateItem(index, 'batch', e.target.value)}
-                            placeholder="Batch"
-                            className="w-24 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500"
-                          />
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <span className="font-medium text-gray-800">{item.tax}%</span>
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <span className="text-black font-medium">{itemTotal > 0 ? itemTotal.toFixed(2) : '0.00'}</span>
-                        </td>
-                        <td className="p-2 align-middle">
-                          {saleItems.length > 1 && (
-                            <button
-                              onClick={() => handleRemoveRow(index)}
-                              className="text-red-500 hover:text-red-700 font-bold text-lg px-2"
-                              title="Remove item"
+                return (
+                  <div key={index} className="rounded-lg border border-gray-300 bg-[#f6f6f6] p-4">
+                    <div className="flex flex-wrap items-end gap-4">
+                      {index === 0 && (
+                        <>
+                          <div className="flex flex-col flex-1 min-w-[160px]">
+                            <label className="mb-1 text-xs font-medium text-gray-600">
+                              Customer Name
+                            </label>
+                            <select
+                              value={selectedCustomerId}
+                              onChange={(e) => {
+                                setSelectedCustomerId(e.target.value)
+                                const c = mockCustomers.find((x) => x.id === e.target.value)
+                                if (c) setSelectedTallyName(c.tally_ledger_name || c.name)
+                              }}
+                              className="w-full rounded border border-gray-400 p-2 text-sm bg-white focus:outline-none"
                             >
-                              &times;
-                            </button>
+                              <option value="">Select Customer Name</option>
+                              {mockCustomers.map((customer) => (
+                                <option key={customer.id} value={customer.id}>
+                                  {customer.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="flex flex-col flex-1 min-w-[160px]">
+                            <label className="mb-1 text-xs font-medium text-gray-600">
+                              Tally Name
+                            </label>
+                            <select
+                              value={selectedTallyName}
+                              onChange={(e) => setSelectedTallyName(e.target.value)}
+                              className="w-full rounded border border-gray-400 p-2 text-sm bg-white focus:outline-none"
+                            >
+                              <option value="">Select Tally Name</option>
+                              {mockCustomers.map((customer) => (
+                                <option
+                                  key={customer.id}
+                                  value={customer.tally_ledger_name || customer.name}
+                                >
+                                  {customer.tally_ledger_name || customer.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </>
+                      )}
+
+                      <div className="flex flex-col flex-1 min-w-[160px]">
+                        <label className="mb-1 text-xs font-medium text-gray-600">Product</label>
+                        <select
+                          value={line.selectedProduct}
+                          onChange={(e) => handleProductSelect(index, e.target.value)}
+                          className="w-full border border-gray-400 rounded p-2 bg-white text-sm"
+                        >
+                          <option value="">Select a Product</option>
+                          {mockProducts.map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex flex-col w-28">
+                        <label className="mb-1 text-xs font-medium text-gray-600">
+                          Quantity <span className="text-red-500">*</span>
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            value={line.quantity}
+                            onChange={(e) => updateLine(index, 'quantity', e.target.value)}
+                            placeholder="0"
+                            className="w-full text-center border border-gray-400 rounded bg-white p-2 text-sm focus:outline-none"
+                          />
+                          {unit && (
+                            <span className="text-xs font-medium text-gray-600 whitespace-nowrap">
+                              {unit}
+                            </span>
                           )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col flex-1 min-w-[150px]">
+                        <label className="mb-1 text-xs font-medium text-gray-600">
+                          Sales Ledger / Type
+                        </label>
+                        <select
+                          value={line.selectedSaleType}
+                          onChange={(e) => handleSaleTypeChange(index, e.target.value)}
+                          className="w-full bg-white border border-gray-400 rounded p-2 text-sm focus:outline-none"
+                        >
+                          <option value="">Select type</option>
+                          {saleTypes.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                          <option value="add-type" className="text-green-600 font-semibold">
+                            + Add New Type
+                          </option>
+                        </select>
+                      </div>
+
+                      {saleLines.length > 1 && (
+                        <button
+                          onClick={() => handleRemoveRow(index)}
+                          className="mb-2 text-red-500 hover:text-red-700 font-bold text-xl"
+                          title="Remove product"
+                        >
+                          &times;
+                        </button>
+                      )}
+                    </div>
+
+                    {productId && (
+                      <div
+                        className={`mt-1 text-xs font-medium ${
+                          avail > 0 ? 'text-green-700' : 'text-red-600'
+                        }`}
+                      >
+                        Available Stock: {avail} {unit}
+                      </div>
+                    )}
+
+                    {/* Batch-wise allocation breakdown */}
+                    {productId && qtyNum > 0 && (
+                      <div className="mt-3 overflow-hidden rounded border border-gray-300">
+                        <table className="w-full text-xs text-center">
+                          <thead className="bg-[#e0e0e0] text-gray-700">
+                            <tr>
+                              <th className="py-1.5 px-2 border-r border-gray-300">Batch</th>
+                              <th className="py-1.5 px-2 border-r border-gray-300">Quantity</th>
+                              <th className="py-1.5 px-2 border-r border-gray-300">Selling Price</th>
+                              <th className="py-1.5 px-2 border-r border-gray-300">Tax%</th>
+                              <th className="py-1.5 px-2">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {chunks.map((c, ci) => {
+                              const rowTotal = c.qty * c.sellingPrice * (1 + gst / 100)
+                              return (
+                                <tr key={ci} className="border-t border-gray-200 bg-white">
+                                  <td className="py-1.5 px-2 border-r border-gray-200">
+                                    {c.batchName || 'Primary Batch'}
+                                  </td>
+                                  <td className="py-1.5 px-2 border-r border-gray-200">
+                                    {c.qty} {c.unit || unit}
+                                  </td>
+                                  <td className="py-1.5 px-2 border-r border-gray-200">
+                                    ₹{c.sellingPrice}
+                                  </td>
+                                  <td className="py-1.5 px-2 border-r border-gray-200">{gst}%</td>
+                                  <td className="py-1.5 px-2">₹{rowTotal.toFixed(2)}</td>
+                                </tr>
+                              )
+                            })}
+                            {shortfall > 0.0001 && (
+                              <tr className="border-t border-gray-200 bg-red-50">
+                                <td colSpan={5} className="py-1.5 px-2 text-red-600 font-medium">
+                                  Only {avail} {unit} available — reduce the quantity.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
 
             <div className="flex items-center justify-center gap-6 mt-8 pb-4">
@@ -760,8 +812,8 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
           </div>
         </div>
       )}
-      
-      {/* Additional Details Modal for Sales > 50k (Tally "Additional Details: Local Sales - Taxable") */}
+
+      {/* Additional Details Modal for Sales > 50k */}
       {showAdditionalDetailsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
           <div className="bg-white p-6 rounded-lg border border-gray-300 max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -770,7 +822,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               <button
                 onClick={() => {
                   setShowAdditionalDetailsModal(false)
-                  setPendingInvoice(null)
+                  setPendingPayload(null)
                   resetAdditionalDetailsForm()
                 }}
                 className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
@@ -778,11 +830,13 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                 &times;
               </button>
             </div>
-            
+
             <div className="space-y-4 text-xs">
-              <p className="text-gray-600 italic">All fields below are optional. Required only for Tally compatibility on invoices above ₹50,000.</p>
-              
-              {/* e-Way Bill Details */}
+              <p className="text-gray-600 italic">
+                All fields below are optional. Required only for Tally compatibility on invoices
+                above ₹50,000.
+              </p>
+
               <div className="border-t pt-4">
                 <h4 className="font-semibold text-gray-800 mb-3 text-sm">e-Way Bill Details</h4>
                 <div className="grid grid-cols-2 gap-4">
@@ -792,7 +846,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                       type="text"
                       value={ewayBillNo}
                       onChange={(e) => setEwayBillNo(e.target.value)}
-                      placeholder=""
                       className="border border-gray-400 rounded p-2 bg-white focus:outline-none text-xs"
                     />
                   </div>
@@ -807,8 +860,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                   </div>
                 </div>
               </div>
-              
-              {/* Place of Party */}
+
               <div className="border-t pt-4">
                 <h4 className="font-semibold text-gray-800 mb-3 text-sm">Place of Party</h4>
                 <div className="grid grid-cols-2 gap-4">
@@ -818,7 +870,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                       type="text"
                       value={dispatchFrom}
                       onChange={(e) => setDispatchFrom(e.target.value)}
-                      placeholder=""
                       className="border border-gray-400 rounded p-2 bg-white focus:outline-none text-xs"
                     />
                   </div>
@@ -828,14 +879,12 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                       type="text"
                       value={shipTo}
                       onChange={(e) => setShipTo(e.target.value)}
-                      placeholder=""
                       className="border border-gray-400 rounded p-2 bg-white focus:outline-none text-xs"
                     />
                   </div>
                 </div>
               </div>
-              
-              {/* Transport Details */}
+
               <div className="border-t pt-4">
                 <h4 className="font-semibold text-gray-800 mb-3 text-sm">Transport Details</h4>
                 <div className="grid grid-cols-2 gap-4">
@@ -855,14 +904,12 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                       type="text"
                       value={transporterId}
                       onChange={(e) => setTransporterId(e.target.value)}
-                      placeholder=""
                       className="border border-gray-400 rounded p-2 bg-white focus:outline-none text-xs"
                     />
                   </div>
                 </div>
               </div>
-              
-              {/* Part B Details */}
+
               <div className="border-t pt-4">
                 <h4 className="font-semibold text-gray-800 mb-3 text-sm">Part B Details</h4>
                 <div className="grid grid-cols-2 gap-4">
@@ -886,7 +933,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                       type="text"
                       value={transportDocNo}
                       onChange={(e) => setTransportDocNo(e.target.value)}
-                      placeholder=""
                       className="border border-gray-400 rounded p-2 bg-white focus:outline-none text-xs"
                     />
                   </div>
@@ -905,7 +951,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                       type="text"
                       value={vehicleNumber}
                       onChange={(e) => setVehicleNumber(e.target.value)}
-                      placeholder=""
                       className="border border-gray-400 rounded p-2 bg-white focus:outline-none text-xs"
                     />
                   </div>
@@ -924,12 +969,12 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                 </div>
               </div>
             </div>
-            
+
             <div className="flex justify-center gap-4 mt-6 pt-4 border-t">
               <button
                 onClick={() => {
                   setShowAdditionalDetailsModal(false)
-                  setPendingInvoice(null)
+                  setPendingPayload(null)
                   resetAdditionalDetailsForm()
                 }}
                 className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
@@ -946,11 +991,26 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
           </div>
         </div>
       )}
-      
-      {invoices.length > 0 && (
+
+      {!showNewInvoice && invoices.length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <h3 className="text-lg font-bold text-black mb-4">Sales History</h3>
-          <DataTable columns={columns} data={tableData} />
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-lg font-bold text-black">Sales History</h3>
+            <div className="flex gap-1 rounded-md border border-gray-300 p-0.5">
+              {(['all', 'cash', 'credit'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setHistoryTab(tab)}
+                  className={`rounded px-3 py-1 text-sm font-medium capitalize transition-colors ${
+                    historyTab === tab ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {tab === 'all' ? 'All' : `${tab} Sales`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <DataTable columns={columns} data={tableData} dense />
         </div>
       )}
     </div>

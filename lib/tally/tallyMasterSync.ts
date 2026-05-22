@@ -4,6 +4,7 @@ import { query, queryOne, execute, nowIso } from '@/lib/db'
 import { postXml } from './tallyClient'
 import { parseTallyResponse } from './tallyResponseParser'
 import { GST_LEDGERS } from './config'
+import { gstRateLedgerName } from './tallyXmlBuilder'
 import {
   ledgerMessage,
   gstLedgerMessage,
@@ -13,14 +14,41 @@ import {
   buildMastersEnvelope,
 } from './tallyMasterBuilder'
 
-// The four GST tax ledgers the voucher builder references.
+// The GST tax ledgers the voucher builder references — CGST/SGST for local
+// supply and IGST for interstate. Created idempotently so vouchers never fail
+// because a tax ledger is missing.
 export function gstLedgerMessages(): string[] {
   return [
     gstLedgerMessage(GST_LEDGERS.inputCgst, 'Central Tax'),
     gstLedgerMessage(GST_LEDGERS.inputSgst, 'State Tax'),
+    gstLedgerMessage(GST_LEDGERS.inputIgst, 'Integrated Tax'),
     gstLedgerMessage(GST_LEDGERS.outputCgst, 'Central Tax'),
     gstLedgerMessage(GST_LEDGERS.outputSgst, 'State Tax'),
+    gstLedgerMessage(GST_LEDGERS.outputIgst, 'Integrated Tax'),
   ]
+}
+
+// Rate-wise GST tax ledgers (e.g. "Input CGST @ 9%") for the given GST rates,
+// so the voucher can post — and display — the rate on each tax line.
+function gstRateLedgerMessages(
+  kind: 'purchase' | 'sales',
+  gstRates: number[],
+): string[] {
+  const messages: string[] = []
+  for (const rate of gstRates) {
+    if (!(rate > 0)) continue
+    const half = rate / 2
+    if (kind === 'purchase') {
+      messages.push(gstLedgerMessage(gstRateLedgerName(GST_LEDGERS.inputCgst, half), 'Central Tax'))
+      messages.push(gstLedgerMessage(gstRateLedgerName(GST_LEDGERS.inputSgst, half), 'State Tax'))
+      messages.push(gstLedgerMessage(gstRateLedgerName(GST_LEDGERS.inputIgst, rate), 'Integrated Tax'))
+    } else {
+      messages.push(gstLedgerMessage(gstRateLedgerName(GST_LEDGERS.outputCgst, half), 'Central Tax'))
+      messages.push(gstLedgerMessage(gstRateLedgerName(GST_LEDGERS.outputSgst, half), 'State Tax'))
+      messages.push(gstLedgerMessage(gstRateLedgerName(GST_LEDGERS.outputIgst, rate), 'Integrated Tax'))
+    }
+  }
+  return messages
 }
 
 export type MasterKind = 'supplier' | 'customer' | 'product' | 'product_type'
@@ -231,8 +259,13 @@ export async function ensureMastersForVoucher(opts: {
       messages.push(ledgerMessage(it.ledgerName, ledgerGroupForType(it.ledgerName)))
     }
   }
-  // Always ensure GST ledgers exist (idempotent) so GST vouchers never fail.
+  // Always ensure GST ledgers exist (idempotent) so GST vouchers never fail —
+  // both the generic ledgers and the rate-wise ones the voucher references.
   messages.push(...gstLedgerMessages())
+  const distinctRates = [
+    ...new Set(opts.items.map((it) => Number(it.gstRate || 0)).filter((r) => r > 0)),
+  ]
+  messages.push(...gstRateLedgerMessages(opts.kind, distinctRates))
   if (messages.length === 0) return
   try {
     const mastersXml = buildMastersEnvelope(messages)

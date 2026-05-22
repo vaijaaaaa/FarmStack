@@ -72,7 +72,10 @@ export interface InvoiceItem {
   tally_price: number
   gst: number
   type?: string
+  unit?: string
 }
+
+export type SaleType = 'cash' | 'credit'
 
 export type TallySyncStatus = 'not_synced' | 'pending' | 'synced' | 'failed' | 'blocked'
 
@@ -83,6 +86,7 @@ export interface SalesInvoice {
   customer_name?: string
   tally_name?: string
   date?: string
+  sale_type?: SaleType
   product_name?: string
   quantity?: number
   selling_price?: number
@@ -119,6 +123,8 @@ export interface PurchaseInvoice {
   quantity?: number
   buying_price?: number
   expiry_date?: string
+  batch?: string
+  unit?: string
   total_price?: number
   items?: InvoiceItem[]
   total: number

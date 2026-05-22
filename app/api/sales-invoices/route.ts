@@ -14,6 +14,7 @@ interface SalesItemInput {
   tally_price?: number | string
   gst?: number | string
   type?: string
+  unit?: string
 }
 
 export async function GET() {
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const customerId = String(body.customer_id ?? '').trim()
     const items: SalesItemInput[] = Array.isArray(body.items) ? body.items : []
-    const tallySyncEnabled = Boolean(body.tally_sync_enabled ?? body.tally_status)
+    const saleType = String(body.sale_type ?? 'cash').toLowerCase() === 'credit' ? 'credit' : 'cash'
 
     if (!customerId) {
       return NextResponse.json({ error: 'Customer is required' }, { status: 400 })
@@ -65,6 +66,7 @@ export async function POST(request: Request) {
       tally_price: Number(it.tally_price ?? it.rate ?? 0),
       gst: Number(it.gst ?? 0),
       type: String(it.type ?? ''),
+      unit: String(it.unit ?? ''),
     }))
     for (let i = 0; i < builtItems.length; i++) {
       const it = builtItems[i]
@@ -123,16 +125,35 @@ export async function POST(request: Request) {
       (sum, it) => sum + it.quantity * it.rate * (1 + it.gst / 100),
       0,
     )
+
+    // Auto-decide Tally sync: a sale is sent to Tally only when EVERY product
+    // in it was purchased through a Tally-synced purchase (so its stock already
+    // exists in Tally). If any product was purchased with Tally sync off, that
+    // stock never reached Tally, so this sale is not Tally-relevant.
+    const productIds = [...new Set(builtItems.map((it) => it.product_id).filter(Boolean))]
+    let tallySyncEnabled = productIds.length > 0
+    for (const pid of productIds) {
+      const r = await queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM purchase_items pit
+         JOIN purchase_invoices pi ON pi.id = pit.invoice_id
+         WHERE pit.product_id = ? AND pi.tally_sync_status = 'synced'`,
+        [pid],
+      )
+      if (!r || r.c === 0) {
+        tallySyncEnabled = false
+        break
+      }
+    }
     const initialStatus = tallySyncEnabled ? 'pending' : 'not_synced'
 
     await transaction((run) => {
       run(
         `INSERT INTO sales_invoices
-          (id, invoice_number, customer_id, customer_name, tally_name, date, total, status,
+          (id, invoice_number, customer_id, customer_name, tally_name, date, sale_type, total, status,
            eway_bill_no, eway_bill_date, dispatch_from, ship_to, transporter_name, transporter_id,
            transport_mode, transport_doc_no, transport_doc_date, vehicle_number, vehicle_type,
            tally_sync_enabled, tally_sync_status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           invoiceNumber,
@@ -140,6 +161,7 @@ export async function POST(request: Request) {
           String(body.customer_name ?? ''),
           String(body.tally_name ?? ''),
           String(body.date ?? ''),
+          saleType,
           total,
           String(body.status ?? 'saved'),
           body.eway_bill_no ?? null,
@@ -160,9 +182,10 @@ export async function POST(request: Request) {
       )
       for (const it of builtItems) {
         run(
-          `INSERT INTO sales_items (id, invoice_id, product_id, batch, quantity, rate, tally_price, gst, type)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [it.id, id, it.product_id, it.batch, it.quantity, it.rate, it.tally_price, it.gst, it.type],
+          `INSERT INTO sales_items
+            (id, invoice_id, product_id, batch, quantity, rate, tally_price, gst, type, unit)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [it.id, id, it.product_id, it.batch, it.quantity, it.rate, it.tally_price, it.gst, it.type, it.unit],
         )
       }
     })
@@ -181,6 +204,7 @@ export async function POST(request: Request) {
         customer_name: body.customer_name ?? '',
         tally_name: body.tally_name ?? '',
         date: body.date ?? '',
+        sale_type: saleType,
         items: builtItems,
         total,
         status: body.status ?? 'saved',

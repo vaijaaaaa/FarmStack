@@ -95,6 +95,8 @@ export interface PurchaseHistoryRow {
   type: string
   tax: number
   total_price: number
+  batch: string
+  unit: string
   status: string
   created_at: string
   tally_sync_enabled: number

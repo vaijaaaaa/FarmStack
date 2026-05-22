@@ -13,6 +13,22 @@ const todayISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// A blank purchase row. unit / productType / gstRate are auto-filled (read-only)
+// from the selected product master; batch and expiryDate are entered per purchase.
+const emptyPurchaseItem = {
+  selectedProduct: '',
+  quantity: '',
+  batch: '',
+  buyingPrice: '',
+  sellingPrice: '',
+  tallyPrice: '',
+  expiryDate: '',
+  unit: '',
+  productType: '',
+  gstRate: '',
+}
+type PurchaseItem = typeof emptyPurchaseItem
+
 interface PurchaseInvoiceModuleProps {
   language: Language
 }
@@ -43,16 +59,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const [tallyStatus, setTallyStatus] = useState(false)
 
   // Multi-item rows State
-  const [purchaseItems, setPurchaseItems] = useState([{
-    selectedProduct: '',
-    quantity: '',
-    buyingPrice: '',
-    sellingPrice: '',
-    tallyPrice: '',
-    expiryDate: '',
-    selectedType: 'fertilizer',
-    productConfig: 'No 1'
-  }])
+  const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>([{ ...emptyPurchaseItem }])
 
   // Modal States
   const [showSupplierDetailsModal, setShowSupplierDetailsModal] = useState(false)
@@ -62,9 +69,9 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const [showSearchProductDialog, setShowSearchProductDialog] = useState(false)
   const [showProductSearchResults, setShowProductSearchResults] = useState(false)
   const [currentSearchIndex, setCurrentSearchIndex] = useState<number | null>(null)
-  const [currentTypeIndex, setCurrentTypeIndex] = useState<number | null>(null)
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false)
   const [showAddTypeModal, setShowAddTypeModal] = useState(false)
+  const [currentTypeIndex, setCurrentTypeIndex] = useState<number | null>(null)
   const [newTypeName, setNewTypeName] = useState('')
   const [newTypeGST, setNewTypeGST] = useState('')
   const [productSearch, setProductSearch] = useState({
@@ -78,12 +85,13 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     cPriceTo: '',
   })
   
-  const [productTypes, setProductTypes] = useState([
+  // Fallback product-type list for the "Add Product" modal dropdown.
+  const productTypes = [
     { id: 'fertilizer', name: 'Purchase of Fertilizer', tax: 5 },
     { id: 'micronutrients', name: 'Purchase of Micronutrients', tax: 12 },
     { id: 'pesticide', name: 'Purchase of Pesticide', tax: 18 },
-    { id: 'seeds', name: 'Purchase of Seeds', tax: 0 }
-  ])
+    { id: 'seeds', name: 'Purchase of Seeds', tax: 0 },
+  ]
   const adminPurchaseTypes = adminProductTypes.filter((type) => type.name.toLowerCase().startsWith('purchase'))
   const availableProductTypes = [
     ...adminPurchaseTypes,
@@ -120,7 +128,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
 
   const hasProductSearchFilters = Object.values(productSearch).some((value) => value.trim() !== '')
 
-  const handleUpdateItem = (index: number, field: string, value: any) => {
+  const handleUpdateItem = (index: number, field: keyof PurchaseItem, value: string) => {
     const updated = [...purchaseItems]
     updated[index] = { ...updated[index], [field]: value }
     setPurchaseItems(updated)
@@ -137,83 +145,29 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       toast.error(`Item ${missing + 1}: Quantity is required before adding another item.`)
       return
     }
-    setPurchaseItems([...purchaseItems, {
-      selectedProduct: '',
-      quantity: '',
-      buyingPrice: '',
-      sellingPrice: '',
-      tallyPrice: '',
-      expiryDate: '',
-      selectedType: 'fertilizer',
-      productConfig: 'No 1'
-    }])
+    setPurchaseItems([...purchaseItems, { ...emptyPurchaseItem }])
   }
 
   const handleRemoveRow = (indexToRemove: number) => {
     setPurchaseItems(purchaseItems.filter((_, index) => index !== indexToRemove))
   }
 
-  const getTaxForType = (typeId: string) => {
-    const type = availableProductTypes.find(t => t.id === typeId)
-    return type ? type.tax : 0
-  }
-
-  const getTypeName = (typeId: string) => {
-    const type = availableProductTypes.find(t => t.id === typeId)
-    return type ? type.name : 'Purchase of Fertilizer'
-  }
-
-  const normalizeTypeId = (typeName?: string) => {
-    const matchedType = availableProductTypes.find(
-      (type) => type.name.toLowerCase() === typeName?.toLowerCase() || type.id === typeName?.toLowerCase()
-    )
-
-    return matchedType?.id || 'fertilizer'
-  }
-
-  const makeTypeId = (typeName: string) => {
-    const baseId = typeName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'type'
-    let nextId = baseId
-    let count = 1
-
-    while (availableProductTypes.some((type) => type.id === nextId)) {
-      nextId = `${baseId}-${count}`
-      count += 1
-    }
-
-    return nextId
-  }
-
-  const getOrCreateTypeForProduct = (productType?: string, tax = 0) => {
-    if (!productType) return { typeId: availableProductTypes[0]?.id || 'fertilizer', nextProductTypes: availableProductTypes }
-
-    const existingType = availableProductTypes.find(
-      (type) => type.name.toLowerCase() === productType.toLowerCase() || type.id === productType.toLowerCase()
-    )
-
-    if (existingType) {
-      return { typeId: existingType.id, nextProductTypes: availableProductTypes }
-    }
-
-    const newType = { id: makeTypeId(productType), name: productType, tax }
-    return { typeId: newType.id, nextProductTypes: [...availableProductTypes, newType] }
-  }
-
+  // Auto-fill unit, product type, GST rate and price defaults from the selected
+  // product master. The product's price becomes the Buying Price here; Tally
+  // Price comes from the master too. Selling Price, Batch and Expiry Date stay
+  // blank for manual entry. Product Type is auto-filled but stays changeable.
   const applyProductToItem = (index: number, product: Product) => {
-    const { typeId, nextProductTypes } = getOrCreateTypeForProduct(product.product_type, Number(product.gst_rate ?? 0))
     const updated = [...purchaseItems]
-
-    setProductTypes(nextProductTypes)
     updated[index] = {
       ...updated[index],
       selectedProduct: product.id,
-      buyingPrice: product.selling_price ? String(product.selling_price) : updated[index].buyingPrice,
+      unit: product.unit || '',
+      productType: product.product_type || '',
+      gstRate: product.gst_rate != null ? String(product.gst_rate) : '0',
+      buyingPrice: product.selling_price != null ? String(product.selling_price) : '',
       sellingPrice: '',
-      tallyPrice: '',
-      expiryDate: product.expiry_date || updated[index].expiryDate,
-      selectedType: typeId,
+      tallyPrice: product.tally_price != null ? String(product.tally_price) : '',
     }
-
     setPurchaseItems(updated)
   }
 
@@ -302,48 +256,49 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     setShowProductSearchResults(false)
   }
 
+  // Product Type is auto-filled from the product master but stays changeable.
   const handleTypeSelectChange = (index: number, value: string) => {
     if (value === 'add-type') {
       setCurrentTypeIndex(index)
       setNewTypeName('')
+      setNewTypeGST('')
       setShowAddTypeModal(true)
       return
     }
+    handleUpdateItem(index, 'productType', value)
+  }
 
-    handleUpdateItem(index, 'selectedType', value)
+  const closeAddTypeModal = () => {
+    setShowAddTypeModal(false)
+    setCurrentTypeIndex(null)
+    setNewTypeName('')
+    setNewTypeGST('')
   }
 
   const handleSaveType = async () => {
     const typeName = newTypeName.trim()
-    const typeGST = parseInt(newTypeGST) || 0
-    if (!typeName || isNaN(typeGST)) {
-      toast.error('Please enter type name and GST percentage')
+    if (!typeName) {
+      toast.error('Please enter a type name')
       return
     }
-
     try {
       const normalizedTypeName = typeName.toLowerCase().startsWith('purchase')
         ? typeName
         : `Purchase of ${typeName}`
-      const existingType = availableProductTypes.find((type) => type.name.toLowerCase() === normalizedTypeName.toLowerCase())
-      const typeToSelect = existingType || await createProductType({
-        name: normalizedTypeName,
-        description: 'Added from Purchase Invoice',
-        tax: typeGST,
-      })
-
-      if (!existingType && adminPurchaseTypes.length === 0) {
-        setProductTypes([...productTypes, typeToSelect])
-      }
-
+      const existingType = availableProductTypes.find(
+        (type) => type.name.toLowerCase() === normalizedTypeName.toLowerCase(),
+      )
+      const typeToSelect =
+        existingType ||
+        (await createProductType({
+          name: normalizedTypeName,
+          description: 'Added from Purchase Invoice',
+          tax: Number(newTypeGST) || 0,
+        }))
       if (currentTypeIndex !== null) {
-        handleUpdateItem(currentTypeIndex, 'selectedType', typeToSelect.id)
+        handleUpdateItem(currentTypeIndex, 'productType', typeToSelect.name)
       }
-
-      setShowAddTypeModal(false)
-      setCurrentTypeIndex(null)
-      setNewTypeName('')
-      setNewTypeGST('')
+      closeAddTypeModal()
     } catch (err) {
       toast.error(`Failed to add type: ${(err as Error).message}`)
     }
@@ -401,24 +356,30 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       const lines = csvStr.split(/\r\n|\n/).filter(line => line.trim() !== '')
       if (lines.length <= 1) return
       
-      const newItems = lines.slice(1).map(line => {
-        const [productName, qty, price, , expDate, typeVal] = line.split(',').map(s => s?.trim())
-        
-        const product = mockProducts.find(p => p.name.toLowerCase() === productName?.toLowerCase())
-        const productId = product ? product.id : ''
-
+      // CSV columns: Product Name, Quantity, Buying Price, Batch, Expiry Date.
+      // Unit / Type / GST / Tally price come from the product master; the
+      // Buying Price falls back to the product's price when the CSV omits it.
+      const newItems: PurchaseItem[] = lines.slice(1).map((line) => {
+        const [productName, qty, price, batch, expDate] = line.split(',').map((s) => s?.trim())
+        const product = mockProducts.find(
+          (p) => p.name.toLowerCase() === productName?.toLowerCase(),
+        )
+        const productPrice = product?.selling_price != null ? String(product.selling_price) : ''
         return {
-          selectedProduct: productId,
+          ...emptyPurchaseItem,
+          selectedProduct: product ? product.id : '',
           quantity: qty || '',
-          buyingPrice: price || '',
+          batch: batch || '',
+          buyingPrice: price || productPrice,
           sellingPrice: '',
-          tallyPrice: '',
+          tallyPrice: product?.tally_price != null ? String(product.tally_price) : '',
           expiryDate: expDate || '',
-          selectedType: normalizeTypeId(typeVal),
-          productConfig: 'No 1'
+          unit: product?.unit || '',
+          productType: product?.product_type || '',
+          gstRate: product?.gst_rate != null ? String(product.gst_rate) : '0',
         }
       })
-      
+
       setPurchaseItems(newItems)
     }
     reader.readAsText(file)
@@ -426,25 +387,27 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   }
 
   const columns = [
-    { key: 'supplier_name', label: 'Supplier Name' },
-    { key: 'supplier_invoice_number', label: 'Invoice Number' },
-    { key: 'product_name', label: 'Product Name' },
-    { key: 'quantity', label: 'Quantity' },
-    { key: 'buying_price', label: 'Buying Price' },
-    { key: 'selling_price', label: 'Selling Price' },
-    { key: 'tally_price', label: 'Tally Price' },
-    { key: 'expiry_date', label: 'Expiry Date' },
+    { key: 'supplier_name', label: 'Supplier' },
+    { key: 'supplier_invoice_number', label: 'Invoice #' },
+    { key: 'product_name', label: 'Product' },
+    { key: 'quantity', label: 'Qty' },
+    { key: 'batch', label: 'Batch' },
+    { key: 'buying_price', label: 'Buying' },
+    { key: 'selling_price', label: 'Selling' },
+    { key: 'tally_price', label: 'Tally' },
+    { key: 'expiry_date', label: 'Expiry' },
     { key: 'type', label: 'Type' },
     { key: 'tax', label: 'Tax%' },
-    { key: 'total_price', label: 'Total Price' },
-    { key: 'tally', label: 'Tally Status' },
+    { key: 'total_price', label: 'Total' },
+    { key: 'tally', label: 'Status' },
   ]
 
   const tableData = invoices.map((invoice) => ({
     supplier_name: invoice.supplier_name,
     supplier_invoice_number: invoice.supplier_invoice_number,
     product_name: invoice.product_name,
-    quantity: invoice.quantity,
+    quantity: invoice.unit ? `${invoice.quantity} ${invoice.unit}` : invoice.quantity,
+    batch: invoice.batch || '—',
     buying_price: `₹${invoice.buying_price}`,
     selling_price: `Rs.${invoice.selling_price}`,
     tally_price: `Rs.${invoice.tally_price}`,
@@ -477,7 +440,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       return
     }
 
-    // Every item must be valid — quantity is mandatory and must be > 0.
+    // Every item must be valid before saving.
     for (let i = 0; i < purchaseItems.length; i++) {
       const item = purchaseItems[i]
       const label = `Item ${i + 1}`
@@ -485,42 +448,55 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         toast.error(`${label}: Please select a product.`)
         return
       }
-      const qtyRaw = String(item.quantity ?? '').trim()
-      if (qtyRaw === '') {
-        toast.error(`${label}: Quantity is required.`)
-        return
-      }
-      const qty = Number(qtyRaw)
+      const qty = Number(String(item.quantity ?? '').trim())
       if (!Number.isFinite(qty) || qty <= 0) {
-        toast.error(`${label}: Quantity must be greater than 0.`)
+        toast.error(`${label}: Quantity is required and must be greater than 0.`)
         return
       }
-      const price = Number(String(item.buyingPrice ?? '').trim())
-      if (!Number.isFinite(price) || price <= 0) {
-        toast.error(`${label}: Buying price must be greater than 0.`)
+      if (!item.batch.trim()) {
+        toast.error(`${label}: Batch is required.`)
+        return
+      }
+      const buying = Number(String(item.buyingPrice ?? '').trim())
+      if (item.buyingPrice.trim() === '' || !Number.isFinite(buying) || buying < 0) {
+        toast.error(`${label}: Buying Price is required and must be 0 or more.`)
+        return
+      }
+      const selling = Number(String(item.sellingPrice ?? '').trim())
+      if (item.sellingPrice.trim() === '' || !Number.isFinite(selling) || selling < 0) {
+        toast.error(`${label}: Selling Price is required and must be 0 or more.`)
+        return
+      }
+      const tally = Number(String(item.tallyPrice ?? '').trim())
+      if (item.tallyPrice.trim() === '' || !Number.isFinite(tally) || tally < 0) {
+        toast.error(`${label}: Tally Price is required and must be 0 or more.`)
         return
       }
     }
-    const validItems = purchaseItems
     const supplier = mockSuppliers.find((s) => s.id === selectedSupplier)
 
-    const items = validItems.map((item) => {
+    const items = purchaseItems.map((item) => {
       const product = mockProducts.find((p) => p.id === item.selectedProduct)
-      const price = parseFloat(item.buyingPrice || '0')
-      const qty = parseFloat(item.quantity || '0')
-      const tax = getTaxForType(item.selectedType)
+      const qty = Number(item.quantity || '0')
+      const buying = Number(item.buyingPrice || '0')
+      const taxRate = Number(item.gstRate || '0')
+      // Line total = taxable amount (qty * buying price) + GST on it.
+      const taxable = qty * buying
+      const lineTotal = taxable + (taxable * taxRate) / 100
 
       return {
         product_id: item.selectedProduct,
         product_name: product?.name || 'Unknown Product',
         quantity: qty,
-        buying_price: price,
-        selling_price: parseFloat(item.sellingPrice || '0'),
-        tally_price: parseFloat(item.tallyPrice || '0'),
+        buying_price: buying,
+        selling_price: Number(item.sellingPrice || '0'),
+        tally_price: Number(item.tallyPrice || '0'),
         expiry_date: item.expiryDate || '',
-        type: getTypeName(item.selectedType),
-        tax,
-        total_price: qty * price * (1 + tax / 100),
+        type: item.productType,
+        tax: taxRate,
+        total_price: lineTotal,
+        batch: item.batch.trim(),
+        unit: item.unit,
       }
     })
 
@@ -538,16 +514,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       setSupplierInvoiceNumber('')
       setPurchaseDate(todayISO())
       setTallyStatus(false)
-      setPurchaseItems([{
-        selectedProduct: '',
-        quantity: '',
-        buyingPrice: '',
-        sellingPrice: '',
-        tallyPrice: '',
-        expiryDate: '',
-        selectedType: 'fertilizer',
-        productConfig: 'No 1'
-      }])
+      setPurchaseItems([{ ...emptyPurchaseItem }])
       if (tallyStatus && result?.tally) {
         if (result.tally.status === 'synced') {
           toast.success('Purchase saved and synced to Tally successfully!')
@@ -662,11 +629,12 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                   <tr>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Name</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity <span className="text-red-500">*</span></th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Buying Price</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Selling Price</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tally Price</th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Batch <span className="text-red-500">*</span></th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Buying Price <span className="text-red-500">*</span></th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Selling Price <span className="text-red-500">*</span></th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tally Price <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Expiry Date</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Type</th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Type</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tax%</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Total</th>
                     <th className="py-3 px-2 font-semibold whitespace-nowrap"></th>
@@ -674,13 +642,16 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 </thead>
                 <tbody>
                   {purchaseItems.map((item, index) => {
-                    const itemTax = getTaxForType(item.selectedType)
-                    const itemTotal = (parseInt(item.quantity || '0') * parseInt(item.buyingPrice || '0')) * (1 + itemTax / 100)
-                    
+                    const itemTax = Number(item.gstRate || '0')
+                    // Total includes GST: taxable (qty * buying price) + tax.
+                    const itemTaxable =
+                      Number(item.quantity || '0') * Number(item.buyingPrice || '0')
+                    const itemTotal = itemTaxable + (itemTaxable * itemTax) / 100
+
                     return (
                       <tr key={index} className="border-b border-gray-300 bg-[#ebebeb]">
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <select 
+                          <select
                             value={item.selectedProduct}
                             onChange={(e) => handleProductSelectChange(index, e.target.value)}
                             className="w-full border border-gray-400 rounded p-1 bg-white text-xs"
@@ -694,63 +665,86 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                           </select>
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <input 
-                            type="number" 
-                            value={item.quantity}
-                            onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
-                            placeholder="0"
-                            className="w-16 text-center border border-gray-400 rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1" 
+                          <div className="flex items-center justify-center gap-1">
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
+                              placeholder="0"
+                              className="w-16 text-center border border-gray-400 rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1"
+                            />
+                            {item.unit && (
+                              <span className="text-xs font-medium text-gray-600 whitespace-nowrap">
+                                {item.unit}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-2 border-r border-gray-300 align-middle">
+                          <input
+                            type="text"
+                            value={item.batch}
+                            onChange={(e) => handleUpdateItem(index, 'batch', e.target.value)}
+                            placeholder="Batch no."
+                            className="w-24 text-center border border-gray-400 rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1 text-xs"
                           />
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <input 
-                            type="number" 
+                          <input
+                            type="number"
                             value={item.buyingPrice}
                             onChange={(e) => handleUpdateItem(index, 'buyingPrice', e.target.value)}
                             placeholder="0.00"
-                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500" 
+                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500"
                           />
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <input 
-                            type="number" 
+                          <input
+                            type="number"
                             value={item.sellingPrice}
                             onChange={(e) => handleUpdateItem(index, 'sellingPrice', e.target.value)}
                             placeholder="0.00"
-                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500" 
+                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500"
                           />
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <input 
-                            type="number" 
+                          <input
+                            type="number"
                             value={item.tallyPrice}
                             onChange={(e) => handleUpdateItem(index, 'tallyPrice', e.target.value)}
                             placeholder="0.00"
-                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500" 
+                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500"
                           />
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <input 
-                            type="date" 
+                          <input
+                            type="date"
                             value={item.expiryDate}
                             onChange={(e) => handleUpdateItem(index, 'expiryDate', e.target.value)}
-                            className="w-28 bg-white border border-gray-400 rounded text-center focus:outline-none p-1 text-gray-800 text-xs" 
+                            className="w-28 bg-white border border-gray-400 rounded text-center focus:outline-none p-1 text-gray-800 text-xs"
                           />
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle text-xs">
-                          <select 
-                            value={item.selectedType}
+                          <select
+                            value={item.productType}
                             onChange={(e) => handleTypeSelectChange(index, e.target.value)}
-                            className="w-28 bg-white border border-gray-400 rounded text-xs focus:outline-none text-gray-800 p-1"
+                            className="w-32 bg-white border border-gray-400 rounded text-xs focus:outline-none text-gray-800 p-1"
                           >
-                            {availableProductTypes.map(t => (
-                              <option key={t.id} value={t.id}>{t.name}</option>
+                            <option value="">Select type</option>
+                            {item.productType &&
+                              !availableProductTypes.some((t) => t.name === item.productType) && (
+                                <option value={item.productType}>{item.productType}</option>
+                              )}
+                            {availableProductTypes.map((t) => (
+                              <option key={t.id} value={t.name}>{t.name}</option>
                             ))}
                             <option value="add-type">+ Add Type</option>
                           </select>
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <span className="font-medium text-gray-800">{itemTax}%</span>
+                          <span className="font-medium text-gray-800">
+                            {item.selectedProduct ? `${itemTax}%` : '—'}
+                          </span>
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
                           <span className="text-black font-medium">{itemTotal > 0 ? itemTotal.toFixed(2) : '0.00'}</span>
@@ -815,12 +809,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-xl font-bold text-black">Add Purchase Type</h3>
               <button
-                onClick={() => {
-                  setShowAddTypeModal(false)
-                  setCurrentTypeIndex(null)
-                  setNewTypeName('')
-                  setNewTypeGST('')
-                }}
+                onClick={closeAddTypeModal}
                 className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
               >
                 &times;
@@ -852,12 +841,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
               </div>
               <div className="flex justify-center gap-4 mt-2">
                 <button
-                  onClick={() => {
-                    setShowAddTypeModal(false)
-                    setCurrentTypeIndex(null)
-                    setNewTypeName('')
-                    setNewTypeGST('')
-                  }}
+                  onClick={closeAddTypeModal}
                   className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
                 >
                   Cancel
@@ -1360,7 +1344,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       {invoices.length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-6">
           <h3 className="text-lg font-bold text-black mb-4">Purchase History</h3>
-          <DataTable columns={columns} data={tableData} />
+          <DataTable columns={columns} data={tableData} dense />
         </div>
       )}
     </div>

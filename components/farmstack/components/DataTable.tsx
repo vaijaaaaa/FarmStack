@@ -10,9 +10,12 @@ interface Column {
 interface DataTableProps {
   columns: Column[]
   data: Record<string, ReactNode>[]
+  // dense: fit many columns with no horizontal scroll (compact padding,
+  // fixed layout, wrapping cells).
+  dense?: boolean
 }
 
-export default function DataTable({ columns, data }: DataTableProps) {
+export default function DataTable({ columns, data, dense = false }: DataTableProps) {
   const [selected, setSelected] = useState(-1)
   const bodyRef = useRef<HTMLTableSectionElement>(null)
 
@@ -46,18 +49,25 @@ export default function DataTable({ columns, data }: DataTableProps) {
     }
   }
 
+  const thClass = dense
+    ? 'px-2 py-2 text-left text-[10px] font-semibold uppercase text-gray-700 break-words'
+    : 'px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700'
+  const tdClass = dense
+    ? 'px-2 py-2 align-top text-xs text-gray-900 break-words'
+    : 'px-4 py-3 text-sm text-gray-900'
+
   return (
     <div
-      className="overflow-x-auto outline-none"
+      className={dense ? 'outline-none' : 'overflow-x-auto outline-none'}
       tabIndex={0}
       role="grid"
       onKeyDown={handleKeyDown}
     >
-      <table className="w-full">
+      <table className={dense ? 'w-full table-fixed' : 'w-full'}>
         <thead>
           <tr className="border-b border-gray-200">
             {columns.map((col) => (
-              <th key={col.key} className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">
+              <th key={col.key} className={thClass}>
                 {col.label}
               </th>
             ))}
@@ -73,7 +83,7 @@ export default function DataTable({ columns, data }: DataTableProps) {
               }`}
             >
               {columns.map((col) => (
-                <td key={col.key} className="px-4 py-3 text-sm text-gray-900">
+                <td key={col.key} className={tdClass}>
                   {row[col.key]}
                 </td>
               ))}
