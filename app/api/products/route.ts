@@ -5,8 +5,8 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SELECT_COLUMNS = `id, name, kannada_name, hsn_code, unit, product_type, gst_rate,
-        location, selling_price, tally_price, expiry_date, maintain_batches, tally_stock_item_name,
-        tally_sync_status, tally_response, tally_synced_at`
+        location, selling_price, tally_price, expiry_date, maintain_batches, gst_supply_type, batch,
+        tally_stock_item_name, tally_sync_status, tally_response, tally_synced_at`
 
 export async function GET(request: Request) {
   try {
@@ -95,14 +95,16 @@ export async function POST(request: Request) {
       tally_price: Number(body.tally_price ?? 0),
       expiry_date: String(body.expiry_date ?? ''),
       maintain_batches: Boolean(body.maintain_batches),
+      gst_supply_type: String(body.gst_supply_type ?? 'local'),
+      batch: String(body.batch ?? ''),
       tally_stock_item_name: String(body.tally_stock_item_name ?? name),
     }
 
     await execute(
       `INSERT INTO products (id, name, kannada_name, hsn_code, unit, product_type, location, gst_rate,
                              selling_price, tally_price, expiry_date, maintain_batches,
-                             tally_stock_item_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             gst_supply_type, batch, tally_stock_item_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         product.id,
         product.name,
@@ -116,6 +118,8 @@ export async function POST(request: Request) {
         product.tally_price,
         product.expiry_date,
         product.maintain_batches ? 1 : 0,
+        product.gst_supply_type,
+        product.batch,
         product.tally_stock_item_name,
         nowIso(),
       ],
@@ -158,6 +162,8 @@ export async function PUT(request: Request) {
          tally_price = ?,
          expiry_date = ?,
          maintain_batches = ?,
+         gst_supply_type = ?,
+         batch = ?,
          tally_stock_item_name = ?
        WHERE id = ?`,
       [
@@ -172,6 +178,8 @@ export async function PUT(request: Request) {
         Number(body.tally_price ?? 0),
         String(body.expiry_date ?? ''),
         Boolean(body.maintain_batches) ? 1 : 0,
+        String(body.gst_supply_type ?? 'local'),
+        String(body.batch ?? ''),
         String(body.tally_stock_item_name ?? name),
         id,
       ],

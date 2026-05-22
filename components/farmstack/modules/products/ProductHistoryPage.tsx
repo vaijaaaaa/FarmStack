@@ -88,7 +88,7 @@ export default function ProductHistoryPage({
     name: product.name,
     hsn_code: product.hsn_code || 'N/A',
     product_type: product.product_type || 'N/A',
-    gst_rate: `${product.gst_rate || 0}%`,
+    gst_rate: Number(product.gst_rate) > 0 ? `${product.gst_rate}%` : 'Exempted',
     selling_price: `₹${product.selling_price || 0}`,
     tally_price: `₹${product.tally_price || 0}`,
     expiry_date: product.expiry_date || 'N/A',

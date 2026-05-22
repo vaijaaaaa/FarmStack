@@ -51,6 +51,8 @@ export interface Product extends TallyMasterFields {
   tally_price?: number
   expiry_date?: string
   maintain_batches: boolean
+  gst_supply_type?: string
+  batch?: string
   tally_stock_item_name: string
 }
 

@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS products (
   tally_price REAL DEFAULT 0,
   expiry_date TEXT DEFAULT '',
   maintain_batches INTEGER DEFAULT 0,
+  gst_supply_type TEXT DEFAULT 'local',
+  batch TEXT DEFAULT '',
   tally_stock_item_name TEXT DEFAULT '',
   created_at TEXT NOT NULL
 );
@@ -172,6 +174,8 @@ function applySchema(db: any): void {
   db.run('PRAGMA foreign_keys = ON;')
   db.run(SCHEMA)
   ensureColumn(db, 'products', 'location', "TEXT DEFAULT ''")
+  ensureColumn(db, 'products', 'gst_supply_type', "TEXT DEFAULT 'local'")
+  ensureColumn(db, 'products', 'batch', "TEXT DEFAULT ''")
   const tallyColumns: Array<[string, string]> = [
     ['tally_sync_enabled', 'INTEGER DEFAULT 0'],
     ['tally_sync_status', "TEXT DEFAULT 'not_synced'"],
