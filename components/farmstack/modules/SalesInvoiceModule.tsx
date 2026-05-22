@@ -175,10 +175,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   }
 
   // ----- Sales history ----------------------------------------------------
-  const tallySyncedProductIds = new Set(
-    purchaseInvoices.filter((p) => p.tally_sync_status === 'synced').map((p) => p.product_id),
-  )
-
   const columns = [
     { key: 'customer_name', label: 'Customer' },
     { key: 'sale_type', label: 'Sale Type' },
@@ -200,9 +196,11 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const tableData = visibleInvoices.flatMap((invoice) => {
     const customer = mockCustomers.find((c) => c.id === invoice.customer_id)
     const invoiceDate = invoice.date || new Date(invoice.created_at).toISOString().split('T')[0]
-    const tallyEligible =
-      invoice.items.length > 0 &&
-      invoice.items.every((it) => tallySyncedProductIds.has(it.product_id))
+    // Tally status/retry is shown ONLY for sales that were Tally-eligible when
+    // created — i.e. every product came from a Tally-synced purchase. This is
+    // frozen at sale time via the stored tally_sync_enabled flag; a sale of a
+    // non-synced-purchase product never gets sync/resync options.
+    const tallyEligible = Boolean(invoice.tally_sync_enabled)
 
     // A sale split across multiple batches must show as ONE history row per
     // product — group the per-batch items back together for display.
@@ -1200,7 +1198,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               ))}
             </div>
           </div>
-          <DataTable columns={columns} data={tableData} dense />
+          <DataTable columns={columns} data={tableData} dense pageSize={10} />
         </div>
       )}
     </div>

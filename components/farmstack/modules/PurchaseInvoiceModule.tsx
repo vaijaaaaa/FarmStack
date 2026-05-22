@@ -1536,7 +1536,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       {invoices.length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-6">
           <h3 className="text-lg font-bold text-black mb-4">Purchase History</h3>
-          <DataTable columns={columns} data={tableData} dense />
+          <DataTable columns={columns} data={tableData} dense pageSize={10} />
         </div>
       )}
     </div>
