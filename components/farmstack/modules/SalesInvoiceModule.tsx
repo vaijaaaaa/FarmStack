@@ -7,6 +7,12 @@ import { Button } from '@/components/ui/button'
 import DataTable from '../components/DataTable'
 import TallyStatusCell from '../components/TallyStatusCell'
 
+// Today's date as YYYY-MM-DD (local time) for date inputs.
+const todayISO = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 interface SalesInvoiceModuleProps {
   language: Language
 }
@@ -46,7 +52,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const [showNewInvoice, setShowNewInvoice] = useState(false)
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedTallyName, setSelectedTallyName] = useState('')
-  const [date, setDate] = useState('')
+  const [date, setDate] = useState(todayISO)
   const [saleItems, setSaleItems] = useState<SaleItemRow[]>([createEmptySaleItem()])
   const [showAddSaleTypeModal, setShowAddSaleTypeModal] = useState(false)
   const [newSaleTypeName, setNewSaleTypeName] = useState('')
@@ -396,7 +402,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       setSaleItems([createEmptySaleItem()])
       setSelectedCustomerId('')
       setSelectedTallyName('')
-      setDate('')
+      setDate(todayISO())
       toast.success('Sale Invoice saved successfully!')
     } catch (err) {
       toast.error(`Failed to save invoice: ${(err as Error).message}`)
@@ -446,7 +452,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       setSaleItems([createEmptySaleItem()])
       setSelectedCustomerId('')
       setSelectedTallyName('')
-      setDate('')
+      setDate(todayISO())
       setShowAdditionalDetailsModal(false)
       setPendingInvoice(null)
       resetAdditionalDetailsForm()
