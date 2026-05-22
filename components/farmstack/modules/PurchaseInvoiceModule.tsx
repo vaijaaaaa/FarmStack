@@ -70,6 +70,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const [showProductSearchResults, setShowProductSearchResults] = useState(false)
   const [currentSearchIndex, setCurrentSearchIndex] = useState<number | null>(null)
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false)
+  const [detailPurchaseId, setDetailPurchaseId] = useState<string | null>(null)
   const [showAddTypeModal, setShowAddTypeModal] = useState(false)
   const [currentTypeIndex, setCurrentTypeIndex] = useState<number | null>(null)
   const [newTypeName, setNewTypeName] = useState('')
@@ -400,6 +401,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     { key: 'tax', label: 'Tax%' },
     { key: 'total_price', label: 'Total' },
     { key: 'tally', label: 'Status' },
+    { key: 'actions', label: 'Details' },
   ]
 
   const tableData = invoices.map((invoice) => ({
@@ -424,7 +426,21 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         onSynced={refresh}
       />
     ),
+    actions: (
+      <button
+        onClick={() => setDetailPurchaseId(invoice.id)}
+        data-kbd-row-action
+        className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+      >
+        View Details
+      </button>
+    ),
   }))
+
+  // All flattened rows that belong to the purchase invoice being viewed.
+  const detailRows = detailPurchaseId
+    ? invoices.filter((r) => r.id === detailPurchaseId)
+    : []
 
   const handleSavePurchase = async () => {
     if (!selectedSupplier) {
@@ -1341,6 +1357,108 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
           </div>
         </div>
       )}
+      {/* Purchase details modal */}
+      {detailPurchaseId && detailRows.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg border border-gray-300 bg-white">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-black">
+                Purchase Details — {detailRows[0].supplier_invoice_number}
+              </h3>
+              <button
+                onClick={() => setDetailPurchaseId(null)}
+                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="px-6 py-4">
+              <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                <div>
+                  <span className="text-gray-500">Supplier:</span>{' '}
+                  <span className="font-medium">{detailRows[0].supplier_name || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Invoice #:</span>{' '}
+                  <span className="font-medium">{detailRows[0].supplier_invoice_number || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Purchase Date:</span>{' '}
+                  <span className="font-medium">{detailRows[0].purchase_date || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Tally Sync:</span>{' '}
+                  <span className="font-medium capitalize">
+                    {(detailRows[0].tally_sync_status || 'not_synced').replace('_', ' ')}
+                  </span>
+                </div>
+              </div>
+
+              <table className="w-full border border-gray-300 text-sm">
+                <thead className="bg-[#e0e0e0] text-gray-700">
+                  <tr>
+                    <th className="border-r border-gray-300 px-2 py-1.5 text-left">Product</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Batch</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Qty</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Buying</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Selling</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Tally</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Expiry</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Tax%</th>
+                    <th className="px-2 py-1.5">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailRows.map((r, i) => (
+                    <tr key={i} className="border-t border-gray-200">
+                      <td className="border-r border-gray-200 px-2 py-1.5">{r.product_name}</td>
+                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                        {r.batch || '—'}
+                      </td>
+                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                        {r.quantity} {r.unit || ''}
+                      </td>
+                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                        ₹{r.buying_price}
+                      </td>
+                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                        ₹{r.selling_price}
+                      </td>
+                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                        ₹{r.tally_price}
+                      </td>
+                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                        {r.expiry_date || '—'}
+                      </td>
+                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">{r.tax}%</td>
+                      <td className="px-2 py-1.5 text-center">₹{r.total_price.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-300 bg-[#e0e0e0] font-semibold">
+                    <td className="border-r border-gray-300 px-2 py-2" colSpan={8}>
+                      Grand Total
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      ₹{detailRows.reduce((s, r) => s + r.total_price, 0).toFixed(2)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <div className="flex justify-end border-t border-gray-200 px-6 py-3">
+              <button
+                onClick={() => setDetailPurchaseId(null)}
+                className="rounded-md bg-gray-200 px-5 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {invoices.length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-6">
           <h3 className="text-lg font-bold text-black mb-4">Purchase History</h3>

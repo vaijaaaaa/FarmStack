@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Language, SaleType } from '@/types/farmstack'
+import { Language, SaleType, SalesInvoice } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { useCustomers, useProducts, useProductTypes, usePurchaseInvoices, useSalesInvoices } from '@/hooks/useDatabase'
 import { toast } from 'sonner'
@@ -63,6 +63,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const [showSaleTypePopup, setShowSaleTypePopup] = useState(false)
   const [saleType, setSaleType] = useState<SaleType>('cash')
   const [historyTab, setHistoryTab] = useState<'all' | 'cash' | 'credit'>('all')
+  const [detailSale, setDetailSale] = useState<SalesInvoice | null>(null)
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedTallyName, setSelectedTallyName] = useState('')
@@ -176,6 +177,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     { key: 'tax', label: 'Tax%' },
     { key: 'total', label: 'Total' },
     { key: 'tally', label: 'Status' },
+    { key: 'actions', label: 'Details' },
   ]
 
   const visibleInvoices = invoices.filter(
@@ -189,19 +191,32 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       invoice.items.length > 0 &&
       invoice.items.every((it) => tallySyncedProductIds.has(it.product_id))
 
-    return invoice.items.map((item) => {
-      const product = mockProducts.find((p) => p.id === item.product_id)
-      const itemTotal = item.quantity * item.rate * (1 + item.gst / 100)
+    // A sale split across multiple batches must show as ONE history row per
+    // product — group the per-batch items back together for display.
+    const byProduct = new Map<string, typeof invoice.items>()
+    for (const it of invoice.items) {
+      const key = String(it.product_id)
+      if (!byProduct.has(key)) byProduct.set(key, [])
+      byProduct.get(key)!.push(it)
+    }
+
+    return [...byProduct.values()].map((items) => {
+      const product = mockProducts.find((p) => p.id === items[0].product_id)
+      const totalQty = items.reduce((s, i) => s + i.quantity, 0)
+      const totalAmt = items.reduce((s, i) => s + i.quantity * i.rate * (1 + i.gst / 100), 0)
+      const batches = [...new Set(items.map((i) => i.batch).filter(Boolean))]
+      const prices = [...new Set(items.map((i) => i.rate))]
+      const unit = items[0].unit || product?.unit || ''
       return {
         customer_name: invoice.customer_name || customer?.name || 'N/A',
         sale_type: (invoice.sale_type || 'cash') === 'credit' ? 'Credit Sale' : 'Cash Sale',
         date: invoiceDate,
         product_name: product?.name || invoice.product_name || 'N/A',
-        batch: item.batch || '—',
-        quantity: item.unit ? `${item.quantity} ${item.unit}` : item.quantity,
-        selling_price: `Rs.${item.rate}`,
-        tax: `${item.gst}%`,
-        total: `Rs.${itemTotal.toFixed(2)}`,
+        batch: batches.length ? batches.join(', ') : '—',
+        quantity: unit ? `${totalQty} ${unit}` : totalQty,
+        selling_price: prices.length === 1 ? `Rs.${prices[0]}` : 'Multiple',
+        tax: `${items[0].gst}%`,
+        total: `Rs.${totalAmt.toFixed(2)}`,
         tally: tallyEligible ? (
           <TallyStatusCell
             type="sales"
@@ -214,6 +229,15 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
           <span className="text-xs text-gray-400" title="Not synced to Tally at purchase — not applicable">
             —
           </span>
+        ),
+        actions: (
+          <button
+            onClick={() => setDetailSale(invoice)}
+            data-kbd-row-action
+            className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+          >
+            View Details
+          </button>
         ),
       }
     })
@@ -720,6 +744,26 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                               </tr>
                             )}
                           </tbody>
+                          <tfoot>
+                            {(() => {
+                              const totalQty = chunks.reduce((s, c) => s + c.qty, 0)
+                              const grandTotal = chunks.reduce(
+                                (s, c) => s + c.qty * c.sellingPrice * (1 + gst / 100),
+                                0,
+                              )
+                              return (
+                                <tr className="border-t-2 border-gray-300 bg-[#e0e0e0] font-semibold text-gray-800">
+                                  <td className="py-2 px-2 border-r border-gray-300">Total</td>
+                                  <td className="py-2 px-2 border-r border-gray-300">
+                                    {totalQty} {unit}
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-gray-300" />
+                                  <td className="py-2 px-2 border-r border-gray-300" />
+                                  <td className="py-2 px-2">₹{grandTotal.toFixed(2)}</td>
+                                </tr>
+                              )
+                            })()}
+                          </tfoot>
                         </table>
                       </div>
                     )}
@@ -986,6 +1030,112 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                 className="bg-blue-500 hover:bg-blue-600 text-white font-medium px-6 py-2 rounded-lg"
               >
                 Save & Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sale details modal */}
+      {detailSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg border border-gray-300 bg-white">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-black">
+                Sale Details — {detailSale.invoice_number}
+              </h3>
+              <button
+                onClick={() => setDetailSale(null)}
+                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="px-6 py-4">
+              <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                <div>
+                  <span className="text-gray-500">Customer:</span>{' '}
+                  <span className="font-medium">{detailSale.customer_name || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Tally Name:</span>{' '}
+                  <span className="font-medium">{detailSale.tally_name || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Date:</span>{' '}
+                  <span className="font-medium">{detailSale.date || 'N/A'}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Sale Type:</span>{' '}
+                  <span className="font-medium capitalize">
+                    {(detailSale.sale_type || 'cash') === 'credit' ? 'Credit Sale' : 'Cash Sale'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Status:</span>{' '}
+                  <span className="font-medium capitalize">{detailSale.status}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500">Tally Sync:</span>{' '}
+                  <span className="font-medium capitalize">
+                    {(detailSale.tally_sync_status || 'not_synced').replace('_', ' ')}
+                  </span>
+                </div>
+              </div>
+
+              <table className="w-full border border-gray-300 text-sm">
+                <thead className="bg-[#e0e0e0] text-gray-700">
+                  <tr>
+                    <th className="border-r border-gray-300 px-2 py-1.5 text-left">Product</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Batch</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Quantity</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Selling Price</th>
+                    <th className="border-r border-gray-300 px-2 py-1.5">Tax%</th>
+                    <th className="px-2 py-1.5">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailSale.items.map((it, i) => {
+                    const product = mockProducts.find((p) => p.id === it.product_id)
+                    const lineTotal = it.quantity * it.rate * (1 + it.gst / 100)
+                    return (
+                      <tr key={i} className="border-t border-gray-200">
+                        <td className="border-r border-gray-200 px-2 py-1.5">
+                          {product?.name || 'N/A'}
+                        </td>
+                        <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                          {it.batch || 'Primary Batch'}
+                        </td>
+                        <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                          {it.quantity} {it.unit || product?.unit || ''}
+                        </td>
+                        <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                          ₹{it.rate}
+                        </td>
+                        <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                          {it.gst}%
+                        </td>
+                        <td className="px-2 py-1.5 text-center">₹{lineTotal.toFixed(2)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-gray-300 bg-[#e0e0e0] font-semibold">
+                    <td className="border-r border-gray-300 px-2 py-2" colSpan={5}>
+                      Grand Total
+                    </td>
+                    <td className="px-2 py-2 text-center">₹{Number(detailSale.total).toFixed(2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <div className="flex justify-end border-t border-gray-200 px-6 py-3">
+              <button
+                onClick={() => setDetailSale(null)}
+                className="rounded-md bg-gray-200 px-5 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+              >
+                Close
               </button>
             </div>
           </div>
