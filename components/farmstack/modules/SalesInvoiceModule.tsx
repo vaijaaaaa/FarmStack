@@ -48,6 +48,7 @@ interface AllocChunk {
   sellingPrice: number
   tallyPrice: number
   unit: string
+  expiry: string
 }
 
 export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps) {
@@ -64,6 +65,8 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const [saleType, setSaleType] = useState<SaleType>('cash')
   const [historyTab, setHistoryTab] = useState<'all' | 'cash' | 'credit'>('all')
   const [detailSale, setDetailSale] = useState<SalesInvoice | null>(null)
+  // User overrides for a batch's selling price, keyed by "lineIndex:batchName".
+  const [priceOverrides, setPriceOverrides] = useState<Record<string, string>>({})
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedTallyName, setSelectedTallyName] = useState('')
@@ -152,6 +155,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         sellingPrice: b.sellingPrice,
         tallyPrice: b.tallyPrice,
         unit: b.unit,
+        expiry: b.expiry,
       })
       remaining -= take
     }
@@ -160,6 +164,15 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
 
   const productGst = (productId: string) =>
     Number(mockProducts.find((p) => p.id === productId)?.gst_rate ?? 0)
+
+  const priceKey = (lineIndex: number, batchName: string) => `${lineIndex}:${batchName}`
+
+  // Selling price for an allocated batch — the user override if edited,
+  // otherwise the batch's default price from the purchase.
+  const effectivePrice = (lineIndex: number, c: AllocChunk) => {
+    const o = priceOverrides[priceKey(lineIndex, c.batchName)]
+    return o !== undefined && o !== '' ? Number(o) : c.sellingPrice
+  }
 
   // ----- Sales history ----------------------------------------------------
   const tallySyncedProductIds = new Set(
@@ -375,6 +388,10 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         toast.error(`${label}: Quantity is required and must be greater than 0.`)
         return null
       }
+      if (!line.selectedSaleType) {
+        toast.error(`${label}: Please select a Sales Ledger / Type.`)
+        return null
+      }
       const { chunks, shortfall } = allocate(line.selectedProduct, qty)
       const product = mockProducts.find((p) => p.id === line.selectedProduct)
       const name = product?.name || 'this product'
@@ -387,13 +404,14 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       const gst = productGst(line.selectedProduct)
       const ledgerName = saleTypes.find((s) => s.id === line.selectedSaleType)?.name || ''
       for (const c of chunks) {
-        const lineTotal = c.qty * c.sellingPrice * (1 + gst / 100)
+        const price = effectivePrice(i, c)
+        const lineTotal = c.qty * price * (1 + gst / 100)
         total += lineTotal
         items.push({
           product_id: line.selectedProduct,
           batch: c.batchName,
           quantity: c.qty,
-          rate: c.sellingPrice,
+          rate: price,
           tally_price: c.tallyPrice,
           gst,
           type: ledgerName,
@@ -664,7 +682,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
 
                       <div className="flex flex-col flex-1 min-w-[150px]">
                         <label className="mb-1 text-xs font-medium text-gray-600">
-                          Sales Ledger / Type
+                          Sales Ledger / Type <span className="text-red-500">*</span>
                         </label>
                         <select
                           value={line.selectedSaleType}
@@ -711,25 +729,46 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                           <thead className="bg-[#e0e0e0] text-gray-700">
                             <tr>
                               <th className="py-1.5 px-2 border-r border-gray-300">Batch</th>
+                              <th className="py-1.5 px-2 border-r border-gray-300">Expiry Date</th>
                               <th className="py-1.5 px-2 border-r border-gray-300">Quantity</th>
                               <th className="py-1.5 px-2 border-r border-gray-300">Selling Price</th>
                               <th className="py-1.5 px-2 border-r border-gray-300">Tax%</th>
-                              <th className="py-1.5 px-2">Total</th>
+                              <th className="py-1.5 px-2">Total (Inc.GST)</th>
                             </tr>
                           </thead>
                           <tbody>
                             {chunks.map((c, ci) => {
-                              const rowTotal = c.qty * c.sellingPrice * (1 + gst / 100)
+                              const price = effectivePrice(index, c)
+                              const rowTotal = c.qty * price * (1 + gst / 100)
                               return (
                                 <tr key={ci} className="border-t border-gray-200 bg-white">
                                   <td className="py-1.5 px-2 border-r border-gray-200">
                                     {c.batchName || 'Primary Batch'}
                                   </td>
                                   <td className="py-1.5 px-2 border-r border-gray-200">
+                                    {c.expiry || '—'}
+                                  </td>
+                                  <td className="py-1.5 px-2 border-r border-gray-200">
                                     {c.qty} {c.unit || unit}
                                   </td>
                                   <td className="py-1.5 px-2 border-r border-gray-200">
-                                    ₹{c.sellingPrice}
+                                    <div className="flex items-center justify-center gap-1">
+                                      <span>₹</span>
+                                      <input
+                                        type="number"
+                                        value={
+                                          priceOverrides[priceKey(index, c.batchName)] ??
+                                          String(c.sellingPrice)
+                                        }
+                                        onChange={(e) =>
+                                          setPriceOverrides({
+                                            ...priceOverrides,
+                                            [priceKey(index, c.batchName)]: e.target.value,
+                                          })
+                                        }
+                                        className="w-24 text-center border border-gray-300 rounded p-1 focus:outline-none"
+                                      />
+                                    </div>
                                   </td>
                                   <td className="py-1.5 px-2 border-r border-gray-200">{gst}%</td>
                                   <td className="py-1.5 px-2">₹{rowTotal.toFixed(2)}</td>
@@ -738,7 +777,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                             })}
                             {shortfall > 0.0001 && (
                               <tr className="border-t border-gray-200 bg-red-50">
-                                <td colSpan={5} className="py-1.5 px-2 text-red-600 font-medium">
+                                <td colSpan={6} className="py-1.5 px-2 text-red-600 font-medium">
                                   Only {avail} {unit} available — reduce the quantity.
                                 </td>
                               </tr>
@@ -748,12 +787,13 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                             {(() => {
                               const totalQty = chunks.reduce((s, c) => s + c.qty, 0)
                               const grandTotal = chunks.reduce(
-                                (s, c) => s + c.qty * c.sellingPrice * (1 + gst / 100),
+                                (s, c) => s + c.qty * effectivePrice(index, c) * (1 + gst / 100),
                                 0,
                               )
                               return (
                                 <tr className="border-t-2 border-gray-300 bg-[#e0e0e0] font-semibold text-gray-800">
                                   <td className="py-2 px-2 border-r border-gray-300">Total</td>
+                                  <td className="py-2 px-2 border-r border-gray-300" />
                                   <td className="py-2 px-2 border-r border-gray-300">
                                     {totalQty} {unit}
                                   </td>

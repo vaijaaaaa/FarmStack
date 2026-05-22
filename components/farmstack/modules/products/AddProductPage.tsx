@@ -37,6 +37,7 @@ interface ProductFormData {
   selling_price: string
   tally_price: string
   expiry_date: string
+  is_seed: boolean
 }
 
 const emptyProduct: ProductFormData = {
@@ -49,6 +50,7 @@ const emptyProduct: ProductFormData = {
   selling_price: '',
   tally_price: '',
   expiry_date: '',
+  is_seed: false,
 }
 
 interface AddProductPageProps {
@@ -80,6 +82,7 @@ export default function AddProductPage({
             tally_price:
               editingProduct.tally_price != null ? String(editingProduct.tally_price) : '',
             expiry_date: editingProduct.expiry_date || '',
+            is_seed: Boolean(editingProduct.is_seed),
           },
         ]
       : [{ ...emptyProduct }],
@@ -141,6 +144,9 @@ export default function AddProductPage({
     if (p.tally_price.trim() === '' || !Number.isFinite(tp) || tp < 0) {
       errs.push('Tally Price is required and must be 0 or more')
     }
+    if (p.is_seed && !p.expiry_date.trim()) {
+      errs.push('Expiry Date is required for seed products')
+    }
     return errs
   }
 
@@ -158,7 +164,11 @@ export default function AddProductPage({
     return !hasErrors
   }
 
-  const handleProductChange = (index: number, field: keyof ProductFormData, value: string) => {
+  const handleProductChange = (
+    index: number,
+    field: keyof ProductFormData,
+    value: string | boolean,
+  ) => {
     const updated = [...products]
     updated[index] = { ...updated[index], [field]: value }
     setProducts(updated)
@@ -280,6 +290,7 @@ export default function AddProductPage({
           selling_price: Number(p.selling_price || 0),
           tally_price: Number(p.tally_price || 0),
           expiry_date: p.expiry_date,
+          is_seed: p.is_seed,
           tally_stock_item_name: name,
         }
       }
@@ -521,13 +532,31 @@ export default function AddProductPage({
 
               {/* Expiry Date */}
               <div>
-                <label className={labelClass}>Expiry Date</label>
+                <label className={labelClass}>
+                  Expiry Date
+                  {product.is_seed && <span className="text-red-500"> *</span>}
+                </label>
                 <input
                   type="date"
                   value={product.expiry_date}
                   onChange={(e) => handleProductChange(index, 'expiry_date', e.target.value)}
                   className={fieldClass}
                 />
+              </div>
+
+              {/* Seed */}
+              <div className="flex items-end">
+                <label className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={product.is_seed}
+                    onChange={(e) => handleProductChange(index, 'is_seed', e.target.checked)}
+                    className="h-4 w-4 accent-black"
+                  />
+                  <span className="text-sm font-medium text-gray-700">
+                    This is a Seed 
+                  </span>
+                </label>
               </div>
             </div>
           </div>

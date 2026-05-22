@@ -243,12 +243,16 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
     const pid = String(it.product_id)
     const name = (await productName(pid)) || ''
     const unit = String(it.unit || '') || (await productUnit(pid)) || ''
+    // Tally receives the TALLY PRICE (set on the purchase), NOT the customer
+    // selling price. The app keeps showing selling-price figures to the user;
+    // only the amount sent to Tally uses tally_price * quantity (+ GST).
+    const tallyRate = Number(it.tally_price || 0)
     voucherItems.push({
       productName: name,
       unit,
       quantity: Number(it.quantity || 0),
-      rate: Number(it.rate || 0),
-      baseAmount: Number(it.quantity || 0) * Number(it.rate || 0),
+      rate: tallyRate,
+      baseAmount: Number(it.quantity || 0) * tallyRate,
       ledgerName: String(it.type || ''),
       taxPercent: Number(it.gst || 0),
       gstSupplyType: await productGstSupplyType(pid),

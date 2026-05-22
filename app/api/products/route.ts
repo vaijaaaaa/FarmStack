@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 const SELECT_COLUMNS = `id, name, kannada_name, hsn_code, unit, product_type, gst_rate,
         location, selling_price, tally_price, expiry_date, maintain_batches, gst_supply_type, batch,
-        tally_stock_item_name, tally_sync_status, tally_response, tally_synced_at`
+        is_seed, tally_stock_item_name, tally_sync_status, tally_response, tally_synced_at`
 
 export async function GET(request: Request) {
   try {
@@ -42,11 +42,15 @@ export async function GET(request: Request) {
     }
 
     if (useLegacyArray) {
-      const rows = await query<{ maintain_batches: number; [k: string]: unknown }>(
+      const rows = await query<{ maintain_batches: number; is_seed: number; [k: string]: unknown }>(
         `SELECT ${SELECT_COLUMNS} FROM products ORDER BY created_at`,
       )
       return NextResponse.json(
-        rows.map((r) => ({ ...r, maintain_batches: r.maintain_batches === 1 })),
+        rows.map((r) => ({
+          ...r,
+          maintain_batches: r.maintain_batches === 1,
+          is_seed: r.is_seed === 1,
+        })),
       )
     }
 
@@ -57,13 +61,17 @@ export async function GET(request: Request) {
     const total = countResult[0]?.count || 0
 
     params.push(limit, offset)
-    const rows = await query<{ maintain_batches: number; [k: string]: unknown }>(
+    const rows = await query<{ maintain_batches: number; is_seed: number; [k: string]: unknown }>(
       `SELECT ${SELECT_COLUMNS} FROM products ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       params,
     )
 
     return NextResponse.json({
-      data: rows.map((r) => ({ ...r, maintain_batches: r.maintain_batches === 1 })),
+      data: rows.map((r) => ({
+        ...r,
+        maintain_batches: r.maintain_batches === 1,
+        is_seed: r.is_seed === 1,
+      })),
       total,
       page,
       limit,
@@ -97,14 +105,15 @@ export async function POST(request: Request) {
       maintain_batches: Boolean(body.maintain_batches),
       gst_supply_type: String(body.gst_supply_type ?? 'local'),
       batch: String(body.batch ?? ''),
+      is_seed: Boolean(body.is_seed),
       tally_stock_item_name: String(body.tally_stock_item_name ?? name),
     }
 
     await execute(
       `INSERT INTO products (id, name, kannada_name, hsn_code, unit, product_type, location, gst_rate,
                              selling_price, tally_price, expiry_date, maintain_batches,
-                             gst_supply_type, batch, tally_stock_item_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             gst_supply_type, batch, is_seed, tally_stock_item_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         product.id,
         product.name,
@@ -120,6 +129,7 @@ export async function POST(request: Request) {
         product.maintain_batches ? 1 : 0,
         product.gst_supply_type,
         product.batch,
+        product.is_seed ? 1 : 0,
         product.tally_stock_item_name,
         nowIso(),
       ],
@@ -164,6 +174,7 @@ export async function PUT(request: Request) {
          maintain_batches = ?,
          gst_supply_type = ?,
          batch = ?,
+         is_seed = ?,
          tally_stock_item_name = ?
        WHERE id = ?`,
       [
@@ -180,6 +191,7 @@ export async function PUT(request: Request) {
         Boolean(body.maintain_batches) ? 1 : 0,
         String(body.gst_supply_type ?? 'local'),
         String(body.batch ?? ''),
+        Boolean(body.is_seed) ? 1 : 0,
         String(body.tally_stock_item_name ?? name),
         id,
       ],

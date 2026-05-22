@@ -168,6 +168,8 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       buyingPrice: product.selling_price != null ? String(product.selling_price) : '',
       sellingPrice: '',
       tallyPrice: product.tally_price != null ? String(product.tally_price) : '',
+      // Auto-fill the expiry date from the product master when it has one.
+      expiryDate: product.expiry_date || updated[index].expiryDate,
     }
     setPurchaseItems(updated)
   }
@@ -374,7 +376,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
           buyingPrice: price || productPrice,
           sellingPrice: '',
           tallyPrice: product?.tally_price != null ? String(product.tally_price) : '',
-          expiryDate: expDate || '',
+          expiryDate: expDate || product?.expiry_date || '',
           unit: product?.unit || '',
           productType: product?.product_type || '',
           gstRate: product?.gst_rate != null ? String(product.gst_rate) : '0',
@@ -417,7 +419,9 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     type: invoice.type,
     tax: `${invoice.tax}%`,
     total_price: `₹${invoice.total_price.toFixed(2)}`,
-    tally: (
+    // Only purchases created WITH "Sync with Tally" on get sync/retry actions.
+    // A purchase saved with Tally sync off was intentionally kept out of Tally.
+    tally: invoice.tally_sync_enabled ? (
       <TallyStatusCell
         type="purchase"
         invoiceId={invoice.id}
@@ -425,6 +429,13 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         response={invoice.tally_response}
         onSynced={refresh}
       />
+    ) : (
+      <span
+        className="text-xs text-gray-400"
+        title="This purchase was created with Tally sync off — not sent to Tally"
+      >
+        Not synced
+      </span>
     ),
     actions: (
       <button
@@ -442,6 +453,36 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     ? invoices.filter((r) => r.id === detailPurchaseId)
     : []
 
+  // ----- Uniqueness checks ------------------------------------------------
+  // A supplier invoice number must not already exist in the purchase history.
+  const invoiceNumberTaken =
+    supplierInvoiceNumber.trim() !== '' &&
+    invoices.some(
+      (r) =>
+        String(r.supplier_invoice_number || '').trim().toLowerCase() ===
+        supplierInvoiceNumber.trim().toLowerCase(),
+    )
+
+  // A batch number must be unique for a product — not used in another form row
+  // and not already recorded in the purchase history.
+  const batchDuplicate = (index: number): boolean => {
+    const item = purchaseItems[index]
+    const batch = item.batch.trim().toLowerCase()
+    if (!batch || !item.selectedProduct) return false
+    const inForm = purchaseItems.some(
+      (other, i) =>
+        i !== index &&
+        other.selectedProduct === item.selectedProduct &&
+        other.batch.trim().toLowerCase() === batch,
+    )
+    const inHistory = invoices.some(
+      (r) =>
+        String(r.product_id) === item.selectedProduct &&
+        String(r.batch || '').trim().toLowerCase() === batch,
+    )
+    return inForm || inHistory
+  }
+
   const handleSavePurchase = async () => {
     if (!selectedSupplier) {
       toast.error('Please select a supplier')
@@ -449,6 +490,10 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     }
     if (!supplierInvoiceNumber.trim()) {
       toast.error('Please enter supplier invoice number')
+      return
+    }
+    if (invoiceNumberTaken) {
+      toast.error('This supplier invoice number already exists. Enter a unique invoice number.')
       return
     }
     if (purchaseItems.length === 0) {
@@ -473,6 +518,10 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         toast.error(`${label}: Batch is required.`)
         return
       }
+      if (batchDuplicate(i)) {
+        toast.error(`${label}: Batch "${item.batch.trim()}" already exists for this product.`)
+        return
+      }
       const buying = Number(String(item.buyingPrice ?? '').trim())
       if (item.buyingPrice.trim() === '' || !Number.isFinite(buying) || buying < 0) {
         toast.error(`${label}: Buying Price is required and must be 0 or more.`)
@@ -486,6 +535,12 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       const tally = Number(String(item.tallyPrice ?? '').trim())
       if (item.tallyPrice.trim() === '' || !Number.isFinite(tally) || tally < 0) {
         toast.error(`${label}: Tally Price is required and must be 0 or more.`)
+        return
+      }
+      // Seed products must carry an expiry date — it flows into the stock batch.
+      const itemProduct = mockProducts.find((p) => p.id === item.selectedProduct)
+      if (itemProduct?.is_seed && !item.expiryDate.trim()) {
+        toast.error(`${label}: Expiry Date is required for seed products.`)
         return
       }
     }
@@ -617,13 +672,20 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
               </div>
 
               <div className="flex flex-col gap-3">
-                <input 
-                  type="text" 
-                  placeholder="Supplier Invoice Number" 
+                <input
+                  type="text"
+                  placeholder="Supplier Invoice Number"
                   value={supplierInvoiceNumber}
                   onChange={(e) => setSupplierInvoiceNumber(e.target.value)}
-                  className="w-72 rounded-md border border-gray-400 px-4 py-2 text-center text-gray-700 bg-gray-50 focus:outline-none" 
+                  className={`w-72 rounded-md border px-4 py-2 text-center text-gray-700 bg-gray-50 focus:outline-none ${
+                    invoiceNumberTaken ? 'border-red-500' : 'border-gray-400'
+                  }`}
                 />
+                {invoiceNumberTaken && (
+                  <p className="-mt-2 text-xs font-medium text-red-600">
+                    This invoice number already exists.
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <input 
                     type="checkbox" 
@@ -649,7 +711,12 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Buying Price <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Selling Price <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tally Price <span className="text-red-500">*</span></th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Expiry Date</th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">
+                      Expiry Date
+                      {purchaseItems.some(
+                        (it) => mockProducts.find((p) => p.id === it.selectedProduct)?.is_seed,
+                      ) && <span className="text-red-500"> *</span>}
+                    </th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Type</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tax%</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Total</th>
@@ -702,8 +769,15 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                             value={item.batch}
                             onChange={(e) => handleUpdateItem(index, 'batch', e.target.value)}
                             placeholder="Batch no."
-                            className="w-24 text-center border border-gray-400 rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1 text-xs"
+                            className={`w-24 text-center border rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1 text-xs ${
+                              batchDuplicate(index) ? 'border-red-500' : 'border-gray-400'
+                            }`}
                           />
+                          {batchDuplicate(index) && (
+                            <div className="mt-1 text-[10px] font-medium text-red-600">
+                              Batch already exists
+                            </div>
+                          )}
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
                           <input

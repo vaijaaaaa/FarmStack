@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS products (
   maintain_batches INTEGER DEFAULT 0,
   gst_supply_type TEXT DEFAULT 'local',
   batch TEXT DEFAULT '',
+  is_seed INTEGER DEFAULT 0,
   tally_stock_item_name TEXT DEFAULT '',
   created_at TEXT NOT NULL
 );
@@ -180,6 +181,7 @@ function applySchema(db: any): void {
   ensureColumn(db, 'products', 'location', "TEXT DEFAULT ''")
   ensureColumn(db, 'products', 'gst_supply_type', "TEXT DEFAULT 'local'")
   ensureColumn(db, 'products', 'batch', "TEXT DEFAULT ''")
+  ensureColumn(db, 'products', 'is_seed', 'INTEGER DEFAULT 0')
   const tallyColumns: Array<[string, string]> = [
     ['tally_sync_enabled', 'INTEGER DEFAULT 0'],
     ['tally_sync_status', "TEXT DEFAULT 'not_synced'"],

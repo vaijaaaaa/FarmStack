@@ -53,6 +53,7 @@ export interface Product extends TallyMasterFields {
   maintain_batches: boolean
   gst_supply_type?: string
   batch?: string
+  is_seed?: boolean
   tally_stock_item_name: string
 }
 
