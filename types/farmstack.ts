@@ -21,6 +21,7 @@ export interface Customer extends TallyMasterFields {
   loyalty?: string
   referral?: string
   display_number?: string
+  aadhar_card?: string
   tally_ledger_name: string
 }
 

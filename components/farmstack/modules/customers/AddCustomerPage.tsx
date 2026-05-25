@@ -19,6 +19,7 @@ interface CustomerFormData {
   loyalty: string
   referral: string
   display_number: string
+  aadhar_card: string
 }
 
 const emptyCustomer: CustomerFormData = {
@@ -32,6 +33,7 @@ const emptyCustomer: CustomerFormData = {
   loyalty: '',
   referral: '',
   display_number: '',
+  aadhar_card: '',
 }
 
 interface AddCustomerPageProps {
@@ -62,6 +64,7 @@ export default function AddCustomerPage({
             loyalty: editingCustomer.loyalty || '',
             referral: editingCustomer.referral || '',
             display_number: editingCustomer.display_number || '',
+            aadhar_card: editingCustomer.aadhar_card || '',
           },
         ]
       : [emptyCustomer],
@@ -88,6 +91,9 @@ export default function AddCustomerPage({
     if (!customer.country.trim()) errs.push('Country is required')
     if (customer.gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(customer.gstin)) {
       errs.push('Invalid GSTIN format')
+    }
+    if (customer.aadhar_card && !/^[0-9]{12}$/.test(customer.aadhar_card)) {
+      errs.push('Aadhar card must be 12 digits')
     }
     return errs
   }
@@ -217,7 +223,7 @@ export default function AddCustomerPage({
               </div>
             )}
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">Customer Name</label>
                 <input
@@ -238,6 +244,17 @@ export default function AddCustomerPage({
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
                   placeholder="Enter phone number"
                   maxLength={10}
+                />
+              </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-gray-700">Aadhar Card</label>
+                <input
+                  type="text"
+                  value={customer.aadhar_card}
+                  onChange={(e) => handleChange(index, 'aadhar_card', e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                  placeholder="Enter aadhar card number"
+                  maxLength={12}
                 />
               </div>
               <div>
