@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Language, SaleType, SalesInvoice } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { useCustomers, useProducts, useProductTypes, usePurchaseInvoices, useSalesInvoices } from '@/hooks/useDatabase'
@@ -70,6 +70,11 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedTallyName, setSelectedTallyName] = useState('')
+  // Searchable customer dropdown — search by Name or City (address field).
+  const [customerOpen, setCustomerOpen] = useState(false)
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerSearchBy, setCustomerSearchBy] = useState<'name' | 'city'>('name')
+  const customerBoxRef = useRef<HTMLDivElement>(null)
   const [date, setDate] = useState(todayISO)
   const [saleLines, setSaleLines] = useState<SaleLine[]>([createEmptyLine()])
 
@@ -164,6 +169,30 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
 
   const productGst = (productId: string) =>
     Number(mockProducts.find((p) => p.id === productId)?.gst_rate ?? 0)
+
+  // Close the customer dropdown when clicking outside of it.
+  useEffect(() => {
+    if (!customerOpen) return
+    const onClick = (e: MouseEvent) => {
+      if (customerBoxRef.current && !customerBoxRef.current.contains(e.target as Node)) {
+        setCustomerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [customerOpen])
+
+  const filteredCustomers = mockCustomers.filter((c) => {
+    const q = customerSearch.trim().toLowerCase()
+    if (!q) return true
+    if (customerSearchBy === 'city') {
+      return (c.address || '').toLowerCase().includes(q)
+    }
+    return c.name.toLowerCase().includes(q)
+  })
+
+  const selectedCustomerLabel =
+    mockCustomers.find((c) => c.id === selectedCustomerId)?.name || ''
 
   const priceKey = (lineIndex: number, batchName: string) => `${lineIndex}:${batchName}`
 
@@ -597,26 +626,98 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                     <div className="flex flex-wrap items-end gap-4">
                       {index === 0 && (
                         <>
-                          <div className="flex flex-col flex-1 min-w-[160px]">
+                          <div
+                            ref={customerBoxRef}
+                            className="relative flex flex-col flex-1 min-w-[200px]"
+                          >
                             <label className="mb-1 text-xs font-medium text-gray-600">
                               Customer Name
                             </label>
-                            <select
-                              value={selectedCustomerId}
-                              onChange={(e) => {
-                                setSelectedCustomerId(e.target.value)
-                                const c = mockCustomers.find((x) => x.id === e.target.value)
-                                if (c) setSelectedTallyName(c.tally_ledger_name || c.name)
-                              }}
-                              className="w-full rounded border border-gray-400 p-2 text-sm bg-white focus:outline-none"
+                            <button
+                              type="button"
+                              onClick={() => setCustomerOpen((o) => !o)}
+                              className="w-full rounded border border-gray-400 bg-white p-2 text-left text-sm focus:outline-none"
                             >
-                              <option value="">Select Customer Name</option>
-                              {mockCustomers.map((customer) => (
-                                <option key={customer.id} value={customer.id}>
-                                  {customer.name}
-                                </option>
-                              ))}
-                            </select>
+                              {selectedCustomerLabel || (
+                                <span className="text-gray-400">Select Customer Name</span>
+                              )}
+                            </button>
+                            {customerOpen && (
+                              <div className="absolute top-full left-0 right-0 z-20 mt-1 max-h-72 overflow-hidden rounded border border-gray-300 bg-white">
+                                <div className="border-b border-gray-200 p-2">
+                                  <div className="mb-2 flex gap-1 rounded-md bg-gray-100 p-0.5 text-xs">
+                                    <button
+                                      type="button"
+                                      onClick={() => setCustomerSearchBy('name')}
+                                      className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
+                                        customerSearchBy === 'name'
+                                          ? 'bg-white text-black'
+                                          : 'text-gray-600 hover:text-black'
+                                      }`}
+                                    >
+                                      By Name
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setCustomerSearchBy('city')}
+                                      className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
+                                        customerSearchBy === 'city'
+                                          ? 'bg-white text-black'
+                                          : 'text-gray-600 hover:text-black'
+                                      }`}
+                                    >
+                                      By City
+                                    </button>
+                                  </div>
+                                  <input
+                                    autoFocus
+                                    type="text"
+                                    value={customerSearch}
+                                    onChange={(e) => setCustomerSearch(e.target.value)}
+                                    placeholder={
+                                      customerSearchBy === 'city'
+                                        ? 'Search city...'
+                                        : 'Search customer name...'
+                                    }
+                                    className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                                  />
+                                </div>
+                                <div className="max-h-48 overflow-y-auto">
+                                  {filteredCustomers.length === 0 ? (
+                                    <div className="px-3 py-3 text-center text-xs text-gray-500">
+                                      No customers found
+                                    </div>
+                                  ) : (
+                                    filteredCustomers.map((customer) => (
+                                      <button
+                                        type="button"
+                                        key={customer.id}
+                                        onClick={() => {
+                                          setSelectedCustomerId(customer.id)
+                                          setSelectedTallyName(
+                                            customer.tally_ledger_name || customer.name,
+                                          )
+                                          setCustomerOpen(false)
+                                          setCustomerSearch('')
+                                        }}
+                                        className={`flex w-full items-start justify-between gap-3 border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-blue-50 ${
+                                          customer.id === selectedCustomerId
+                                            ? 'bg-blue-50 font-medium'
+                                            : ''
+                                        }`}
+                                      >
+                                        <span>{customer.name}</span>
+                                        {customer.address && (
+                                          <span className="text-xs text-gray-500">
+                                            {customer.address}
+                                          </span>
+                                        )}
+                                      </button>
+                                    ))
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
 
                           <div className="flex flex-col flex-1 min-w-[160px]">

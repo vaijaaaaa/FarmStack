@@ -258,13 +258,15 @@ export default function AddCustomerPage({
                 />
               </div>
               <div>
-                <label className="mb-2 block text-sm font-medium text-gray-700">Address</label>
+                <label className="mb-2 block text-sm font-medium text-gray-700">
+                  Address <span className="font-normal text-gray-500"></span>
+                </label>
                 <input
                   type="text"
                   value={customer.address}
                   onChange={(e) => handleChange(index, 'address', e.target.value)}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-                  placeholder="Enter address"
+                  placeholder="Enter city name (e.g., Bangalore)"
                 />
               </div>
               <div>

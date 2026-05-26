@@ -9,6 +9,10 @@ import DataTable from '../../components/DataTable'
 import { ChevronLeft, ChevronRight, Edit2 } from 'lucide-react'
 import { toast } from 'sonner'
 
+// The customer's `address` field stores just the city name, so the city is
+// simply the trimmed address. Used for grouping/filtering customers by city.
+const extractCity = (address?: string | null): string => (address ?? '').trim()
+
 interface CustomerHistoryPageProps {
   language: Language
   onAddCustomer: () => void
@@ -30,6 +34,8 @@ export default function CustomerHistoryPage({
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
   const [searchBy, setSearchBy] = useState('name')
+  const [cityFilter, setCityFilter] = useState('')
+  const [allCities, setAllCities] = useState<string[]>([])
 
   const limit = 10
 
@@ -48,19 +54,46 @@ export default function CustomerHistoryPage({
     }
   }
 
+  // Build the City filter dropdown values from all customers (one-shot).
+  // Normalises case so "bangalore" and "Bangalore" collapse to one entry.
   useEffect(() => {
-    fetchCustomers(1, '', 'name')
+    let cancelled = false
+    customerApi
+      .list()
+      .then((rows) => {
+        if (cancelled) return
+        const seen = new Map<string, string>()
+        for (const r of rows) {
+          const c = extractCity(r.address)
+          if (!c) continue
+          const key = c.toLowerCase()
+          if (!seen.has(key)) seen.set(key, c)
+        }
+        setAllCities([...seen.values()].sort((a, b) => a.localeCompare(b)))
+      })
+      .catch(() => {
+        /* non-fatal — city filter just stays empty */
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
+  // City filter takes precedence over the text search when set.
   useEffect(() => {
     const timer = setTimeout(() => {
-      fetchCustomers(1, search, searchBy)
+      if (cityFilter) {
+        fetchCustomers(1, cityFilter, 'city')
+      } else {
+        fetchCustomers(1, search, searchBy)
+      }
     }, 300)
     return () => clearTimeout(timer)
-  }, [search, searchBy])
+  }, [search, searchBy, cityFilter])
 
   const columns = [
     { key: 'name', label: 'Customer Name' },
+    { key: 'city', label: 'City' },
     { key: 'phone', label: 'Phone' },
     { key: 'gstin', label: 'GSTIN' },
     { key: 'state', label: 'State' },
@@ -71,6 +104,7 @@ export default function CustomerHistoryPage({
 
   const tableData = customers.map((customer) => ({
     name: customer.name,
+    city: extractCity(customer.address) || '—',
     phone: customer.phone || 'N/A',
     gstin: customer.gstin || 'N/A',
     state: customer.state || 'N/A',
@@ -90,6 +124,11 @@ export default function CustomerHistoryPage({
     ),
   }))
 
+  const goToPage = (page: number) => {
+    if (cityFilter) fetchCustomers(page, cityFilter, 'city')
+    else fetchCustomers(page, search, searchBy)
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -105,13 +144,29 @@ export default function CustomerHistoryPage({
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-gray-700">City</label>
+            <select
+              value={cityFilter}
+              onChange={(e) => setCityFilter(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+            >
+              <option value="">All Cities</option>
+              {allCities.map((city) => (
+                <option key={city} value={city}>
+                  {city}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-gray-700">Search By</label>
             <select
               value={searchBy}
               onChange={(e) => setSearchBy(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              disabled={!!cityFilter}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:bg-gray-100 disabled:text-gray-400"
             >
               <option value="name">Customer Name</option>
               <option value="phone">Phone Number</option>
@@ -125,8 +180,9 @@ export default function CustomerHistoryPage({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Type to search..."
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              disabled={!!cityFilter}
+              placeholder={cityFilter ? `Filtering by city: ${cityFilter}` : 'Type to search...'}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black disabled:bg-gray-100 disabled:text-gray-500"
             />
           </div>
         </div>
@@ -143,11 +199,12 @@ export default function CustomerHistoryPage({
             <div className="mt-6 flex items-center justify-between border-t border-gray-200 pt-4">
               <div className="text-sm text-gray-600">
                 Showing page <span className="font-medium">{currentPage}</span> of{' '}
-                <span className="font-medium">{totalPages}</span> ({total} total customers)
+                <span className="font-medium">{totalPages}</span> ({total} total customers
+                {cityFilter ? ` in ${cityFilter}` : ''})
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={() => fetchCustomers(currentPage - 1, search, searchBy)}
+                  onClick={() => goToPage(currentPage - 1)}
                   disabled={currentPage === 1 || loading}
                   className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-2 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -155,7 +212,7 @@ export default function CustomerHistoryPage({
                   Previous
                 </button>
                 <button
-                  onClick={() => fetchCustomers(currentPage + 1, search, searchBy)}
+                  onClick={() => goToPage(currentPage + 1)}
                   disabled={currentPage === totalPages || loading}
                   className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-2 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >

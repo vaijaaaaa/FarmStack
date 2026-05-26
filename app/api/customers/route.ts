@@ -23,17 +23,24 @@ export async function GET(request: Request) {
     const params: string[] = []
 
     if (search.trim()) {
-      const searchValue = `%${search.trim()}%`
-      if (searchBy === 'phone') {
-        whereClause = 'WHERE phone LIKE ?'
-      } else if (searchBy === 'gstin') {
-        whereClause = 'WHERE gstin LIKE ?'
-      } else if (searchBy === 'display_number') {
-        whereClause = 'WHERE display_number LIKE ?'
+      if (searchBy === 'city') {
+        // The customer's address field holds the city name only — match it
+        // exactly (case- and whitespace-insensitive) so the filter is precise.
+        whereClause = 'WHERE LOWER(TRIM(address)) = LOWER(TRIM(?))'
+        params.push(search.trim())
       } else {
-        whereClause = 'WHERE name LIKE ?'
+        const searchValue = `%${search.trim()}%`
+        if (searchBy === 'phone') {
+          whereClause = 'WHERE phone LIKE ?'
+        } else if (searchBy === 'gstin') {
+          whereClause = 'WHERE gstin LIKE ?'
+        } else if (searchBy === 'display_number') {
+          whereClause = 'WHERE display_number LIKE ?'
+        } else {
+          whereClause = 'WHERE name LIKE ?'
+        }
+        params.push(searchValue)
       }
-      params.push(searchValue)
     }
 
     const countResult = await query<{ count: number }>(
