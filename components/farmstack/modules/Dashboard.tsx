@@ -5,15 +5,13 @@ import { Language, UserRole } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import StatCard from '../components/StatCard'
 import DataTable from '../components/DataTable'
-import { 
-  mockSalesInvoices, 
-  mockCustomers, 
-  mockPurchaseInvoices,
-  mockProductStock,
-  mockLedgers,
-  mockCropPurchase,
-  mockSuppliers,
-} from '@/lib/mock-data'
+import {
+  useCustomers,
+  useProducts,
+  usePurchaseInvoices,
+  useSalesInvoices,
+  useSuppliers,
+} from '@/hooks/useDatabase'
 import {
   Select,
   SelectContent,
@@ -32,12 +30,79 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
   const t = (key: string) => getTranslation(language, key)
   const [selectedView, setSelectedView] = useState<string>('sales')
 
+  // Real inventory from purchases vs sales. Each purchase brings stock in;
+  // each sale takes it out. Available = purchased - sold per product.
+  const { customers } = useCustomers()
+  const { suppliers } = useSuppliers()
+  const { products } = useProducts()
+  const { invoices: purchaseRows } = usePurchaseInvoices()
+  const { invoices: salesInvoices } = useSalesInvoices()
+
+  const purchasedByProduct = new Map<string, number>()
+  for (const r of purchaseRows) {
+    const id = String(r.product_id || '')
+    if (!id) continue
+    purchasedByProduct.set(id, (purchasedByProduct.get(id) || 0) + Number(r.quantity || 0))
+  }
+  const soldByProduct = new Map<string, number>()
+  for (const inv of salesInvoices) {
+    for (const it of inv.items || []) {
+      const id = String(it.product_id || '')
+      if (!id) continue
+      soldByProduct.set(id, (soldByProduct.get(id) || 0) + Number(it.quantity || 0))
+    }
+  }
+
+  const inventory = products
+    .map((p) => {
+      const purchased = purchasedByProduct.get(p.id) || 0
+      const sold = soldByProduct.get(p.id) || 0
+      return {
+        id: p.id,
+        name: p.name,
+        unit: p.unit || '',
+        purchased,
+        sold,
+        available: purchased - sold,
+      }
+    })
+    .filter((r) => r.purchased > 0 || r.sold > 0)
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  const LOW_STOCK_THRESHOLD = 10
+  const totalPurchasedQty = inventory.reduce((s, r) => s + r.purchased, 0)
+  const totalSoldQty = inventory.reduce((s, r) => s + r.sold, 0)
+  const totalAvailableQty = inventory.reduce((s, r) => s + Math.max(0, r.available), 0)
+  const lowStockItems = inventory
+    .filter((r) => r.available <= LOW_STOCK_THRESHOLD)
+    .sort((a, b) => a.available - b.available)
+
+  const stockStatus = (available: number) => {
+    if (available <= 0)
+      return { label: 'Out', className: 'bg-red-100 text-red-700' }
+    if (available <= LOW_STOCK_THRESHOLD)
+      return { label: 'Low', className: 'bg-yellow-100 text-yellow-700' }
+    return { label: 'OK', className: 'bg-green-100 text-green-700' }
+  }
+
+  const formatCurrency = (value: number) =>
+    `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+
+  const totalSalesAmount = salesInvoices.reduce((sum, inv) => sum + Number(inv.total || 0), 0)
+  const totalPurchaseAmount = purchaseRows.reduce(
+    (sum, row) => sum + Number(row.total_price || 0),
+    0,
+  )
+  const pendingSyncCount =
+    salesInvoices.filter((inv) => inv.tally_sync_status === 'pending').length +
+    purchaseRows.filter((row) => row.tally_sync_status === 'pending').length
+
   const stats = [
-    { label: t('total_sales'), value: '₹45,000', trend: '+12%' },
-    { label: t('total_purchases'), value: '₹28,000', trend: '+5%' },
-    { label: t('total_customers'), value: mockCustomers.length.toString(), trend: 'Active' },
-    { label: t('low_stock'), value: '3', trend: 'Items' },
-    { label: t('pending_sync'), value: '2', trend: 'Invoices' },
+    { label: t('total_sales'), value: formatCurrency(totalSalesAmount), trend: 'Total' },
+    { label: t('total_purchases'), value: formatCurrency(totalPurchaseAmount), trend: 'Total' },
+    { label: t('total_customers'), value: customers.length.toString(), trend: 'Active' },
+    { label: t('low_stock'), value: String(lowStockItems.length), trend: 'Items' },
+    { label: t('pending_sync'), value: String(pendingSyncCount), trend: 'Invoices' },
   ]
 
   // Sales columns and data
@@ -48,10 +113,13 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
     { key: 'status', label: 'Status' },
   ]
 
-  const salesTableData = mockSalesInvoices.map((invoice) => ({
+  const salesTableData = salesInvoices.map((invoice) => ({
     invoice_number: invoice.invoice_number,
-    customer_id: mockCustomers.find((c) => c.id === invoice.customer_id)?.name || 'N/A',
-    total: `₹${invoice.total}`,
+    customer_id:
+      customers.find((c) => c.id === invoice.customer_id)?.name ||
+      invoice.customer_name ||
+      '—',
+    total: formatCurrency(Number(invoice.total || 0)),
     status: invoice.status,
   }))
 
@@ -64,30 +132,39 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
     { key: 'status', label: 'Status' },
   ]
 
-  const purchaseTableData = mockPurchaseInvoices.map((invoice) => ({
-    invoice_number: invoice.invoice_number,
-    supplier_name: invoice.supplier_name,
-    items: invoice.items,
-    total: `₹${invoice.total}`,
-    status: invoice.status,
+  const purchaseTableData = purchaseRows.map((row) => ({
+    invoice_number: row.supplier_invoice_number || '—',
+    supplier_name: row.supplier_name || '—',
+    items: row.product_name || '—',
+    total: formatCurrency(Number(row.total_price || 0)),
+    status: row.status || '—',
   }))
 
-  // Product Stock columns and data
+  // Product Stock columns and data — real inventory from purchases vs sales.
   const stockColumns = [
     { key: 'product_name', label: 'Product' },
-    { key: 'quantity', label: 'Quantity' },
     { key: 'unit', label: 'Unit' },
-    { key: 'reorder_level', label: 'Reorder Level' },
+    { key: 'purchased', label: 'Purchased' },
+    { key: 'sold', label: 'Sold' },
+    { key: 'available', label: 'Available' },
     { key: 'status', label: 'Status' },
   ]
 
-  const stockTableData = mockProductStock.map((stock) => ({
-    product_name: stock.product_name,
-    quantity: stock.quantity,
-    unit: stock.unit,
-    reorder_level: stock.reorder_level,
-    status: stock.status,
-  }))
+  const stockTableData = inventory.map((r) => {
+    const s = stockStatus(r.available)
+    return {
+      product_name: r.name,
+      unit: r.unit || '—',
+      purchased: r.purchased,
+      sold: r.sold,
+      available: Math.max(0, r.available),
+      status: (
+        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.className}`}>
+          {s.label}
+        </span>
+      ),
+    }
+  })
 
   // Supplier columns and data
   const supplierColumns = [
@@ -97,7 +174,7 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
     { key: 'gstin', label: 'GSTIN' },
   ]
 
-  const supplierTableData = mockSuppliers.map((supplier) => ({
+  const supplierTableData = suppliers.map((supplier) => ({
     name: supplier.name,
     phone: supplier.phone,
     address: supplier.address,
@@ -112,43 +189,11 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
     { key: 'gstin', label: 'GSTIN' },
   ]
 
-  const customerTableData = mockCustomers.map((customer) => ({
+  const customerTableData = customers.map((customer) => ({
     name: customer.name,
     phone: customer.phone,
     address: customer.address,
     gstin: customer.gstin,
-  }))
-
-  // Ledger columns and data
-  const ledgerColumns = [
-    { key: 'name', label: 'Ledger Name' },
-    { key: 'type', label: 'Type' },
-    { key: 'opening_balance', label: 'Opening Balance' },
-    { key: 'balance', label: 'Current Balance' },
-  ]
-
-  const ledgerTableData = mockLedgers.map((ledger) => ({
-    name: ledger.name,
-    type: ledger.type,
-    opening_balance: `₹${ledger.opening_balance}`,
-    balance: `₹${ledger.balance}`,
-  }))
-
-  // Crop Purchase columns and data
-  const cropColumns = [
-    { key: 'crop_name', label: 'Crop Name' },
-    { key: 'farmer_name', label: 'Farmer' },
-    { key: 'quantity', label: 'Quantity' },
-    { key: 'price_per_unit', label: 'Price/Unit' },
-    { key: 'total_price', label: 'Total' },
-  ]
-
-  const cropTableData = mockCropPurchase.map((crop) => ({
-    crop_name: crop.crop_name,
-    farmer_name: crop.farmer_name,
-    quantity: `${crop.quantity} ${crop.unit}`,
-    price_per_unit: `₹${crop.price_per_unit}`,
-    total_price: `₹${crop.total_price}`,
   }))
 
   // Get the appropriate table data and columns based on selected view
@@ -183,18 +228,6 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
           columns: customerColumns,
           data: customerTableData,
           title: 'Customers',
-        }
-      case 'ledgers':
-        return {
-          columns: ledgerColumns,
-          data: ledgerTableData,
-          title: 'Ledgers',
-        }
-      case 'crop_purchase':
-        return {
-          columns: cropColumns,
-          data: cropTableData,
-          title: 'Crop Purchase',
         }
       default:
         return {
@@ -240,6 +273,75 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
         </div>
       </div>
 
+      {/* ----- Inventory ------------------------------------------------- */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-black">Inventory</h3>
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
+            <p className="text-xs font-medium uppercase text-gray-500">Products Tracked</p>
+            <p className="mt-1 text-2xl font-bold text-black">{inventory.length}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
+            <p className="text-xs font-medium uppercase text-gray-500">Total Purchased</p>
+            <p className="mt-1 text-2xl font-bold text-black">{totalPurchasedQty}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
+            <p className="text-xs font-medium uppercase text-gray-500">Total Sold</p>
+            <p className="mt-1 text-2xl font-bold text-black">{totalSoldQty}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
+            <p className="text-xs font-medium uppercase text-gray-500">Available</p>
+            <p className="mt-1 text-2xl font-bold text-black">{totalAvailableQty}</p>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <table className="w-full text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50 text-left">
+              <tr>
+                <th className="px-4 py-2.5 font-semibold text-gray-700">Product</th>
+                <th className="px-4 py-2.5 font-semibold text-gray-700">Unit</th>
+                <th className="px-4 py-2.5 text-right font-semibold text-gray-700">Purchased</th>
+                <th className="px-4 py-2.5 text-right font-semibold text-gray-700">Sold</th>
+                <th className="px-4 py-2.5 text-right font-semibold text-gray-700">Available</th>
+                <th className="px-4 py-2.5 text-right font-semibold text-gray-700">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inventory.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                    No inventory yet — add purchases to see stock here.
+                  </td>
+                </tr>
+              ) : (
+                inventory.map((r) => {
+                  const s = stockStatus(r.available)
+                  return (
+                    <tr key={r.id} className="border-b border-gray-100 last:border-b-0">
+                      <td className="px-4 py-2.5 text-gray-900">{r.name}</td>
+                      <td className="px-4 py-2.5 text-gray-600">{r.unit || '—'}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-900">{r.purchased}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-900">{r.sold}</td>
+                      <td className="px-4 py-2.5 text-right font-medium text-black">
+                        {Math.max(0, r.available)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <span
+                          className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${s.className}`}
+                        >
+                          {s.label}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="rounded-lg border border-gray-200 bg-white p-6">
         <div className="mb-6 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-black">{tableConfig.title}</h3>
@@ -254,8 +356,6 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
                 <SelectItem value="productstock">Product Stock</SelectItem>
                 <SelectItem value="supplier">Supplier</SelectItem>
                 <SelectItem value="customer">Customer</SelectItem>
-                <SelectItem value="ledgers">Ledgers</SelectItem>
-                <SelectItem value="crop_purchase">Crop Purchase</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -266,29 +366,35 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="rounded-lg border border-gray-200 bg-white p-6">
           <h3 className="mb-4 text-lg font-semibold text-black">{t('stock_alerts')}</h3>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <div>
-                <p className="font-medium text-black">Organic Rice</p>
-                <p className="text-sm text-gray-500">Stock: 50 Kg</p>
-              </div>
-              <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">Low</span>
+          {lowStockItems.length === 0 ? (
+            <p className="py-6 text-center text-sm text-gray-500">
+              All products are well stocked.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {lowStockItems.slice(0, 5).map((r) => {
+                const s = stockStatus(r.available)
+                return (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between border-b border-gray-100 pb-3 last:border-b-0 last:pb-0"
+                  >
+                    <div>
+                      <p className="font-medium text-black">{r.name}</p>
+                      <p className="text-sm text-gray-500">
+                        Stock: {Math.max(0, r.available)} {r.unit}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-medium ${s.className}`}
+                    >
+                      {s.label}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-              <div>
-                <p className="font-medium text-black">Wheat Flour</p>
-                <p className="text-sm text-gray-500">Stock: 75 Kg</p>
-              </div>
-              <span className="rounded-full bg-yellow-100 px-3 py-1 text-xs font-medium text-yellow-700">Medium</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-black">Fertilizer NPK</p>
-                <p className="text-sm text-gray-500">Stock: 120 Bag</p>
-              </div>
-              <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">Good</span>
-            </div>
-          </div>
+          )}
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-6">
