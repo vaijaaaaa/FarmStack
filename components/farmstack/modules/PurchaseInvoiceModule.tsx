@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { Language, Product } from '@/types/farmstack'
+import { useState, useEffect, useRef } from 'react'
+import type { Language, Product, Supplier } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { useSuppliers, useProducts, useProductTypes, usePurchaseInvoices } from '@/hooks/useDatabase'
 import { toast } from 'sonner'
@@ -29,6 +29,21 @@ const emptyPurchaseItem = {
 }
 type PurchaseItem = typeof emptyPurchaseItem
 
+// Option lists for the Add Product modal — mirror the Products module.
+const DEFAULT_UNITS = ['Kg', 'Nos', 'Bags', 'Litre']
+const DEFAULT_GST_RATES = [
+  { value: '18', label: '18%' },
+  { value: '5', label: '5%' },
+  { value: '0', label: 'Exempted' },
+]
+const GST_SUPPLY_OPTIONS = [
+  { value: 'local', label: 'Local (CGST + SGST)' },
+  { value: 'interstate', label: 'Interstate (IGST)' },
+]
+
+// GST Rate "0" means Exempted — no tax split, so GST Supply Type is N/A.
+const isExempted = (gstRate: string) => gstRate === '0'
+
 interface PurchaseInvoiceModuleProps {
   language: Language
 }
@@ -40,17 +55,25 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const { invoices, createInvoice, refresh } = usePurchaseInvoices()
   const { productTypes: adminProductTypes, createProductType } = useProductTypes()
   const [showNewInvoice, setShowNewInvoice] = useState(false)
-  const [newSupplier, setNewSupplier] = useState({ name: '', phone: '', address: '', gstin: '', state: '' })
+  const [newSupplier, setNewSupplier] = useState({ name: '', phone: '', address: '', state: '', country: '', gstin: '', place_of_supply: '' })
   const [newProduct, setNewProduct] = useState({
     name: '',
     hsn_code: '',
     unit: '',
     product_type: 'Purchase of Fertilizer',
     gst_rate: '',
+    gst_supply_type: 'local',
     selling_price: '',
     tally_price: '',
     expiry_date: '',
+    is_seed: false,
   })
+  // Unit / GST-rate option lists for the Add Product modal — extendable inline.
+  const [unitOptions, setUnitOptions] = useState<string[]>(DEFAULT_UNITS)
+  const [gstRateOptions, setGstRateOptions] = useState(DEFAULT_GST_RATES)
+  const [addValue, setAddValue] = useState<{ kind: 'unit' | 'gst' } | null>(null)
+  const [addValueInput, setAddValueInput] = useState('')
+  const [addValueError, setAddValueError] = useState('')
   const [addSupplierError, setAddSupplierError] = useState('')
   const [addProductError, setAddProductError] = useState('')
   const [selectedSupplier, setSelectedSupplier] = useState('')
@@ -70,6 +93,11 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const [showProductSearchResults, setShowProductSearchResults] = useState(false)
   const [currentSearchIndex, setCurrentSearchIndex] = useState<number | null>(null)
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false)
+  const [supplierSearch, setSupplierSearch] = useState('')
+  const [supplierSearchForm, setSupplierSearchForm] = useState({ startsWith: '', contains: '', endsWith: '', state: '', gstin: '' })
+  const [supplierSearchResults, setSupplierSearchResults] = useState<Supplier[]>([])
+  const [supplierSearchPerformed, setSupplierSearchPerformed] = useState(false)
+  const supplierDropdownRef = useRef<HTMLDivElement>(null)
   const [detailPurchaseId, setDetailPurchaseId] = useState<string | null>(null)
   const [showAddTypeModal, setShowAddTypeModal] = useState(false)
   const [currentTypeIndex, setCurrentTypeIndex] = useState<number | null>(null)
@@ -199,11 +227,50 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       unit: '',
       product_type: 'Purchase of Fertilizer',
       gst_rate: '',
+      gst_supply_type: 'local',
       selling_price: '',
       tally_price: '',
       expiry_date: '',
+      is_seed: false,
     })
     setAddProductError('')
+  }
+
+  const openAddValue = (kind: 'unit' | 'gst') => {
+    setAddValue({ kind })
+    setAddValueInput('')
+    setAddValueError('')
+  }
+
+  const closeAddValue = () => {
+    setAddValue(null)
+    setAddValueInput('')
+    setAddValueError('')
+  }
+
+  const handleSaveAddValue = () => {
+    if (!addValue) return
+    const raw = addValueInput.trim()
+    if (!raw) {
+      setAddValueError(addValue.kind === 'unit' ? 'Unit name is required' : 'GST rate is required')
+      return
+    }
+    if (addValue.kind === 'unit') {
+      if (!unitOptions.includes(raw)) setUnitOptions([...unitOptions, raw])
+      setNewProduct((p) => ({ ...p, unit: raw }))
+    } else {
+      const num = Number(raw)
+      if (!Number.isFinite(num) || num < 0) {
+        setAddValueError('Enter a valid GST rate number, e.g. 12')
+        return
+      }
+      const value = String(num)
+      if (!gstRateOptions.some((o) => o.value === value)) {
+        setGstRateOptions([...gstRateOptions, { value, label: `${num}%` }])
+      }
+      setNewProduct((p) => ({ ...p, gst_rate: value }))
+    }
+    closeAddValue()
   }
 
   const handleAddProduct = async () => {
@@ -221,9 +288,11 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         unit: newProduct.unit,
         product_type: newProduct.product_type,
         gst_rate: Number(newProduct.gst_rate || 0),
+        gst_supply_type: isExempted(newProduct.gst_rate) ? '' : newProduct.gst_supply_type,
         selling_price: Number(newProduct.selling_price || 0),
         tally_price: Number(newProduct.tally_price || 0),
         expiry_date: newProduct.expiry_date,
+        is_seed: newProduct.is_seed,
         tally_stock_item_name: productName,
       })
 
@@ -298,7 +367,9 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
           description: 'Added from Purchase Invoice',
           tax: Number(newTypeGST) || 0,
         }))
-      if (currentTypeIndex !== null) {
+      if (currentTypeIndex === -1) {
+        setNewProduct((p) => ({ ...p, product_type: typeToSelect.name }))
+      } else if (currentTypeIndex !== null) {
         handleUpdateItem(currentTypeIndex, 'productType', typeToSelect.name)
       }
       closeAddTypeModal()
@@ -306,6 +377,16 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       toast.error(`Failed to add type: ${(err as Error).message}`)
     }
   }
+
+  useEffect(() => {
+    if (!showSupplierDropdown) return
+    const onScroll = (e: Event) => {
+      if (supplierDropdownRef.current?.contains(e.target as Node)) return
+      setShowSupplierDropdown(false)
+    }
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
+  }, [showSupplierDropdown])
 
   const handleSupplierSelect = (supplierId: string) => {
     if (supplierId === 'details') {
@@ -316,13 +397,52 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       setShowSearchSupplierDialog(true)
     } else {
       setSelectedSupplier(supplierId)
+      setSupplierSearch(mockSuppliers.find((s) => s.id === supplierId)?.name || '')
       setShowSupplierDropdown(false)
     }
   }
 
+  const handleSupplierSearch = () => {
+    const startsWith = supplierSearchForm.startsWith.trim().toLowerCase()
+    const contains = supplierSearchForm.contains.trim().toLowerCase()
+    const endsWith = supplierSearchForm.endsWith.trim().toLowerCase()
+    const stateTerm = supplierSearchForm.state.trim().toLowerCase()
+    const gstinTerm = supplierSearchForm.gstin.trim().toLowerCase()
+    const results = mockSuppliers.filter((s) => {
+      const name = (s.name || '').toLowerCase()
+      return (
+        (!startsWith || name.startsWith(startsWith)) &&
+        (!contains || name.includes(contains)) &&
+        (!endsWith || name.endsWith(endsWith)) &&
+        (!stateTerm || (s.state || '').toLowerCase().includes(stateTerm)) &&
+        (!gstinTerm || (s.gstin || '').toLowerCase().includes(gstinTerm))
+      )
+    })
+    setSupplierSearchResults(results)
+    setSupplierSearchPerformed(true)
+  }
+
+  const clearSupplierSearch = () => {
+    setSupplierSearchForm({ startsWith: '', contains: '', endsWith: '', state: '', gstin: '' })
+    setSupplierSearchResults([])
+    setSupplierSearchPerformed(false)
+  }
+
+  const closeSupplierSearch = () => {
+    setShowSearchSupplierDialog(false)
+    clearSupplierSearch()
+  }
+
+  const selectSupplierFromSearch = (supplier: Supplier) => {
+    setSelectedSupplier(supplier.id)
+    setSupplierSearch(supplier.name)
+    setShowSupplierDropdown(false)
+    closeSupplierSearch()
+  }
+
   const closeAddSupplierModal = () => {
     setShowAddSupplierModal(false)
-    setNewSupplier({ name: '', phone: '', address: '', gstin: '', state: '' })
+    setNewSupplier({ name: '', phone: '', address: '', state: '', country: '', gstin: '', place_of_supply: '' })
     setAddSupplierError('')
   }
 
@@ -337,11 +457,14 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         name: newSupplier.name.trim(),
         phone: newSupplier.phone,
         address: newSupplier.address,
-        gstin: newSupplier.gstin,
         state: newSupplier.state,
+        country: newSupplier.country,
+        gstin: newSupplier.gstin,
+        place_of_supply: newSupplier.place_of_supply,
         tally_ledger_name: newSupplier.name.trim(),
       })
       setSelectedSupplier(created.id)
+      setSupplierSearch(created.name)
       setShowSupplierDropdown(false)
       closeAddSupplierModal()
     } catch (err) {
@@ -638,36 +761,59 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
             <div className="flex justify-center gap-12 mb-8">
               {/* Supplier Dropdown */}
               <div className="relative">
-                <button
-                  onClick={() => setShowSupplierDropdown(!showSupplierDropdown)}
-                  className="w-64 rounded-md border-2 border-blue-500 px-4 py-2 text-left text-gray-700 bg-blue-50 hover:bg-blue-100 focus:outline-none font-medium"
-                >
-                  {selectedSupplier ? mockSuppliers.find(s => s.id === selectedSupplier)?.name : 'Supplier Name'}
-                </button>
+                <input
+                  type="text"
+                  value={supplierSearch}
+                  placeholder="Supplier Name"
+                  onChange={(e) => {
+                    setSupplierSearch(e.target.value)
+                    setSelectedSupplier('')
+                    setShowSupplierDropdown(true)
+                  }}
+                  onFocus={() => setShowSupplierDropdown(true)}
+                  className="w-64 rounded-md border-2 border-blue-500 px-4 py-2 text-left text-gray-700 bg-blue-50 focus:outline-none font-medium placeholder:font-normal placeholder:text-gray-400"
+                />
                 {showSupplierDropdown && (
-                  <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-gray-300 rounded-md z-10">
-                    {mockSuppliers.map((supplier) => (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setShowSupplierDropdown(false)}
+                    />
+                    <div ref={supplierDropdownRef} className="absolute top-full left-0 mt-2 w-64 bg-white border border-gray-300 rounded-md z-20 overflow-hidden">
+                      <div className="max-h-60 overflow-y-auto">
+                        {mockSuppliers
+                          .filter((s) =>
+                            s.name.toLowerCase().includes(supplierSearch.toLowerCase()),
+                          )
+                          .map((supplier) => (
+                            <button
+                              key={supplier.id}
+                              onClick={() => handleSupplierSelect(supplier.id)}
+                              className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0"
+                            >
+                              {supplier.name}
+                            </button>
+                          ))}
+                        {mockSuppliers.filter((s) =>
+                          s.name.toLowerCase().includes(supplierSearch.toLowerCase()),
+                        ).length === 0 && (
+                          <p className="px-4 py-3 text-sm text-gray-500">No suppliers found</p>
+                        )}
+                      </div>
                       <button
-                        key={supplier.id}
-                        onClick={() => handleSupplierSelect(supplier.id)}
-                        className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0"
+                        onClick={() => handleSupplierSelect('add')}
+                        className="w-full text-left px-4 py-2 hover:bg-green-50 font-semibold text-green-600 border-t border-gray-300"
                       >
-                        {supplier.name}
+                        + Add Supplier
                       </button>
-                    ))}
-                    <button
-                      onClick={() => handleSupplierSelect('add')}
-                      className="w-full text-left px-4 py-2 hover:bg-green-50 font-semibold text-green-600 border-t border-gray-300"
-                    >
-                      + Add Supplier
-                    </button>
-                    <button
-                      onClick={() => handleSupplierSelect('search')}
-                      className="w-full text-left px-4 py-2 hover:bg-blue-50 font-semibold text-blue-600 border-t border-gray-300"
-                    >
-                      🔍 Search Supplier
-                    </button>
-                  </div>
+                      <button
+                        onClick={() => handleSupplierSelect('search')}
+                        className="w-full text-left px-4 py-2 hover:bg-blue-50 font-semibold text-blue-600 border-t border-gray-300"
+                      >
+                        🔍 Search Supplier
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -894,7 +1040,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
 
       {/* Add Type Modal */}
       {showAddTypeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20">
           <div className="bg-white p-6 rounded-lg min-w-96 border border-gray-300">
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-xl font-bold text-black">Add Purchase Type</h3>
@@ -1000,7 +1146,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       {/* Add Supplier Modal */}
       {showAddSupplierModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
-          <div className="bg-white p-8 rounded-lg min-w-96 border border-gray-300">
+          <div className="bg-white p-8 rounded-lg w-full max-w-2xl border border-gray-300">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold text-black">Add Supplier</h3>
               <button
@@ -1010,7 +1156,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 &times;
               </button>
             </div>
-            <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex flex-col">
                 <label className="text-gray-700 font-medium mb-1 text-sm">Supplier Name</label>
                 <input
@@ -1034,21 +1180,11 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
               </div>
               <div className="flex flex-col">
                 <label className="text-gray-700 font-medium mb-1 text-sm">Address</label>
-                <textarea
+                <input
+                  type="text"
                   placeholder="Address"
                   value={newSupplier.address}
                   onChange={(e) => setNewSupplier({ ...newSupplier, address: e.target.value })}
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                  rows={3}
-                ></textarea>
-              </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">GSTIN</label>
-                <input
-                  type="text"
-                  placeholder="GSTIN"
-                  value={newSupplier.gstin}
-                  onChange={(e) => setNewSupplier({ ...newSupplier, gstin: e.target.value })}
                   className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
                 />
               </div>
@@ -1062,23 +1198,53 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                   className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
                 />
               </div>
-              {addSupplierError && (
-                <p className="text-sm text-red-600">{addSupplierError}</p>
-              )}
-              <div className="flex justify-center gap-4 mt-4">
-                <button
-                  onClick={closeAddSupplierModal}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={handleAddSupplier}
-                  className="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-2 rounded-lg"
-                >
-                  Add Supplier
-                </button>
+              <div className="flex flex-col">
+                <label className="text-gray-700 font-medium mb-1 text-sm">Country</label>
+                <input
+                  type="text"
+                  placeholder="Country"
+                  value={newSupplier.country}
+                  onChange={(e) => setNewSupplier({ ...newSupplier, country: e.target.value })}
+                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                />
               </div>
+              <div className="flex flex-col">
+                <label className="text-gray-700 font-medium mb-1 text-sm">GSTIN</label>
+                <input
+                  type="text"
+                  placeholder="GSTIN"
+                  value={newSupplier.gstin}
+                  onChange={(e) => setNewSupplier({ ...newSupplier, gstin: e.target.value })}
+                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                />
+              </div>
+              <div className="flex flex-col">
+                <label className="text-gray-700 font-medium mb-1 text-sm">Place of Supply</label>
+                <input
+                  type="text"
+                  placeholder="Place of Supply"
+                  value={newSupplier.place_of_supply}
+                  onChange={(e) => setNewSupplier({ ...newSupplier, place_of_supply: e.target.value })}
+                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                />
+              </div>
+            </div>
+            {addSupplierError && (
+              <p className="text-sm text-red-600 mt-4">{addSupplierError}</p>
+            )}
+            <div className="flex justify-center gap-4 mt-6">
+              <button
+                onClick={closeAddSupplierModal}
+                className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
+              >
+                Close
+              </button>
+              <button
+                onClick={handleAddSupplier}
+                className="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-2 rounded-lg"
+              >
+                Add Supplier
+              </button>
             </div>
           </div>
         </div>
@@ -1086,54 +1252,118 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
 
       {/* Search Supplier Modal */}
       {showSearchSupplierDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="bg-white p-8 rounded-lg min-w-100 border border-gray-300">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+          <div className="bg-white p-8 rounded-lg w-full max-w-lg border border-gray-300">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-bold text-black">Search Supplier</h3>
-              <button 
-                onClick={() => setShowSearchSupplierDialog(false)}
+              <button
+                onClick={closeSupplierSearch}
                 className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
               >
                 &times;
               </button>
             </div>
             <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="text-gray-700 font-medium text-sm">Name</label>
-                  <select className="w-full border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none mt-1">
-                    <option>Starts With</option>
-                    <option>Contains</option>
-                    <option>Ends With</option>
-                  </select>
-                </div>
-                <div className="col-span-2">
-                  <label className="text-gray-700 font-medium text-sm">Search Term</label>
-                  <input type="text" placeholder="Enter supplier name" className="w-full border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none mt-1" />
+              <div className="flex flex-col gap-2">
+                <label className="text-gray-700 font-medium text-sm">Name :</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs text-gray-600">Starts With</span>
+                    <input
+                      type="text"
+                      value={supplierSearchForm.startsWith}
+                      onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, startsWith: e.target.value })}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
+                      placeholder="Starts with..."
+                      className="border border-gray-400 rounded px-2 py-1 w-full focus:outline-none text-sm bg-white"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs text-gray-600">Contains</span>
+                    <input
+                      type="text"
+                      value={supplierSearchForm.contains}
+                      onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, contains: e.target.value })}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
+                      placeholder="Contains..."
+                      className="border border-gray-400 rounded px-2 py-1 w-full focus:outline-none text-sm bg-white"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs text-gray-600">Ends With</span>
+                    <input
+                      type="text"
+                      value={supplierSearchForm.endsWith}
+                      onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, endsWith: e.target.value })}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
+                      placeholder="Ends with..."
+                      className="border border-gray-400 rounded px-2 py-1 w-full focus:outline-none text-sm bg-white"
+                    />
+                  </div>
                 </div>
               </div>
               <div className="flex flex-col">
                 <label className="text-gray-700 font-medium text-sm">State</label>
-                <input type="text" placeholder="State" className="w-full border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none mt-1" />
+                <input
+                  type="text"
+                  placeholder="State"
+                  value={supplierSearchForm.state}
+                  onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, state: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
+                  className="w-full border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none mt-1"
+                />
               </div>
               <div className="flex flex-col">
                 <label className="text-gray-700 font-medium text-sm">GSTIN</label>
-                <input type="text" placeholder="GSTIN" className="w-full border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none mt-1" />
+                <input
+                  type="text"
+                  placeholder="GSTIN"
+                  value={supplierSearchForm.gstin}
+                  onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, gstin: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
+                  className="w-full border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none mt-1"
+                />
               </div>
-              <div className="flex justify-center gap-4 mt-4">
+              <div className="flex justify-center gap-4 mt-2">
                 <button
-                  onClick={() => setShowSearchSupplierDialog(false)}
+                  onClick={clearSupplierSearch}
                   className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
                 >
                   Clear
                 </button>
                 <button
-                  onClick={() => setShowSearchSupplierDialog(false)}
+                  onClick={handleSupplierSearch}
                   className="bg-blue-500 hover:bg-blue-600 text-white font-medium px-6 py-2 rounded-lg"
                 >
                   Search
                 </button>
               </div>
+
+              {supplierSearchPerformed && (
+                <div className="mt-2 border-t border-gray-200 pt-4">
+                  <p className="text-sm font-medium text-gray-700 mb-2">
+                    {supplierSearchResults.length} result(s) found
+                  </p>
+                  <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-100">
+                    {supplierSearchResults.map((supplier) => (
+                      <button
+                        key={supplier.id}
+                        onClick={() => selectSupplierFromSearch(supplier)}
+                        className="w-full text-left px-4 py-2 hover:bg-blue-50 focus:outline-none"
+                      >
+                        <span className="block font-medium text-gray-800">{supplier.name}</span>
+                        <span className="block text-xs text-gray-500">
+                          {[supplier.state, supplier.gstin].filter(Boolean).join(' • ') || 'No state / GSTIN'}
+                        </span>
+                      </button>
+                    ))}
+                    {supplierSearchResults.length === 0 && (
+                      <p className="px-4 py-3 text-sm text-gray-500">No suppliers match your search</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1175,38 +1405,82 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 />
               </div>
               <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">Unit</label>
-                <input
-                  type="text"
-                  placeholder="Unit (kg, liter, etc.)"
-                  value={newProduct.unit}
-                  onChange={(e) => setNewProduct({ ...newProduct, unit: e.target.value })}
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                />
-              </div>
-              <div className="flex flex-col">
                 <label className="text-gray-700 font-medium mb-1 text-sm">Product Type</label>
                 <select
                   value={newProduct.product_type}
-                  onChange={(e) => setNewProduct({ ...newProduct, product_type: e.target.value })}
+                  onChange={(e) =>
+                    e.target.value === 'add-type'
+                      ? (setCurrentTypeIndex(-1), setNewTypeName(''), setNewTypeGST(''), setShowAddTypeModal(true))
+                      : setNewProduct({ ...newProduct, product_type: e.target.value })
+                  }
                   className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
                 >
                   {availableProductTypes.map((type) => (
                     <option key={type.id} value={type.name}>{type.name}</option>
                   ))}
+                  <option value="add-type" className="text-green-600 font-semibold">+ Add Product Type</option>
+                </select>
+              </div>
+              <div className="flex flex-col">
+                <label className="text-gray-700 font-medium mb-1 text-sm">Unit</label>
+                <select
+                  value={newProduct.unit}
+                  onChange={(e) =>
+                    e.target.value === '__add_unit__'
+                      ? openAddValue('unit')
+                      : setNewProduct({ ...newProduct, unit: e.target.value })
+                  }
+                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                >
+                  <option value="">Select a unit</option>
+                  {unitOptions.map((u) => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                  <option value="__add_unit__" className="text-green-600 font-semibold">+ Add Unit</option>
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex-1 flex flex-col">
                   <label className="text-gray-700 font-medium mb-1 text-sm">GST Rate</label>
-                  <input
-                    type="number"
-                    placeholder="0"
+                  <select
                     value={newProduct.gst_rate}
-                    onChange={(e) => setNewProduct({ ...newProduct, gst_rate: e.target.value })}
+                    onChange={(e) =>
+                      e.target.value === '__add_gst__'
+                        ? openAddValue('gst')
+                        : setNewProduct({ ...newProduct, gst_rate: e.target.value })
+                    }
                     className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                  />
+                  >
+                    <option value="">Select GST rate</option>
+                    {gstRateOptions.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                    <option value="__add_gst__" className="text-green-600 font-semibold">+ Add GST Rate</option>
+                  </select>
                 </div>
+                <div className="flex-1 flex flex-col">
+                  <label className="text-gray-700 font-medium mb-1 text-sm">GST Supply Type</label>
+                  {isExempted(newProduct.gst_rate) ? (
+                    <input
+                      type="text"
+                      value="Not Applicable (Exempted)"
+                      disabled
+                      className="border border-gray-400 rounded p-2 bg-gray-100 text-gray-500 focus:outline-none"
+                    />
+                  ) : (
+                    <select
+                      value={newProduct.gst_supply_type}
+                      onChange={(e) => setNewProduct({ ...newProduct, gst_supply_type: e.target.value })}
+                      className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                    >
+                      {GST_SUPPLY_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="flex-1 flex flex-col">
                   <label className="text-gray-700 font-medium mb-1 text-sm">Selling Price</label>
                   <input
@@ -1217,8 +1491,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                     className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
                   />
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
                 <div className="flex-1 flex flex-col">
                   <label className="text-gray-700 font-medium mb-1 text-sm">Tally Price</label>
                   <input
@@ -1229,16 +1501,27 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                     className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
                   />
                 </div>
-                <div className="flex-1 flex flex-col">
-                  <label className="text-gray-700 font-medium mb-1 text-sm">Expiry Date</label>
-                  <input
-                    type="date"
-                    value={newProduct.expiry_date}
-                    onChange={(e) => setNewProduct({ ...newProduct, expiry_date: e.target.value })}
-                    className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                  />
-                </div>
               </div>
+              <div className="flex flex-col">
+                <label className="text-gray-700 font-medium mb-1 text-sm">
+                  Expiry Date{newProduct.is_seed && <span className="text-red-500"> *</span>}
+                </label>
+                <input
+                  type="date"
+                  value={newProduct.expiry_date}
+                  onChange={(e) => setNewProduct({ ...newProduct, expiry_date: e.target.value })}
+                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                />
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-400 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={newProduct.is_seed}
+                  onChange={(e) => setNewProduct({ ...newProduct, is_seed: e.target.checked })}
+                  className="h-4 w-4 accent-black"
+                />
+                <span className="text-sm font-medium text-gray-700">This is a Seed</span>
+              </label>
               {addProductError && (
                 <p className="text-sm text-red-600">{addProductError}</p>
               )}
@@ -1254,6 +1537,55 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                   className="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-2 rounded-lg"
                 >
                   Add Product
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Unit / Add GST Rate Modal */}
+      {addValue && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20">
+          <div className="bg-white p-6 rounded-lg min-w-80 border border-gray-300">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-xl font-bold text-black">
+                {addValue.kind === 'unit' ? 'Add Unit' : 'Add GST Rate'}
+              </h3>
+              <button
+                onClick={closeAddValue}
+                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col">
+                <label className="text-gray-700 font-medium mb-1 text-sm">
+                  {addValue.kind === 'unit' ? 'Unit name' : 'GST rate (%)'}
+                </label>
+                <input
+                  type={addValue.kind === 'unit' ? 'text' : 'number'}
+                  value={addValueInput}
+                  onChange={(e) => setAddValueInput(e.target.value)}
+                  placeholder={addValue.kind === 'unit' ? 'e.g. Tonne' : 'e.g. 12'}
+                  autoFocus
+                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                />
+              </div>
+              {addValueError && <p className="text-sm text-red-600">{addValueError}</p>}
+              <div className="flex justify-center gap-4 mt-2">
+                <button
+                  onClick={closeAddValue}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveAddValue}
+                  className="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-2 rounded-lg"
+                >
+                  Add
                 </button>
               </div>
             </div>

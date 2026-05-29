@@ -1,12 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { Language } from '@/types/farmstack'
+import { useEffect, useState } from 'react'
+import { Language, Customer } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { customerApi } from '@/src/services/api'
 import { Button } from '@/components/ui/button'
+import { Upload, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Download, Upload } from 'lucide-react'
 
 interface BulkUploadModalProps {
   language: Language
@@ -15,262 +15,242 @@ interface BulkUploadModalProps {
   onSuccess: () => void
 }
 
-const CSV_TEMPLATE = `name,address,phone,state,country,gstin,acres,loyalty,referral,display_number
-ABC Farm,123 Main St,9876543210,Karnataka,India,27AABCT1234H1Z0,10,Gold,Referral 1,1001
-Green Growers,456 Village Rd,9876543211,Tamil Nadu,India,33AABCD5678H1Z0,20,Silver,Referral 2,1002`
-
-interface CustomerRow {
-  name?: string
-  address?: string
-  phone?: string
-  state?: string
-  country?: string
-  gstin?: string
-  acres?: string
-  loyalty?: string
-  referral?: string
-  display_number?: string
-}
-
-function parseCSV(text: string): CustomerRow[] {
-  const lines = text.split('\n').filter((line) => line.trim())
-  if (lines.length < 2) return []
-
-  const headers = lines[0].split(',').map((h) => h.trim())
-  const rows: CustomerRow[] = []
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',').map((v) => v.trim())
-    const row: CustomerRow = {}
-
-    headers.forEach((header, idx) => {
-      if (values[idx]) {
-        row[header as keyof CustomerRow] = values[idx]
-      }
-    })
-
-    if (row.name) {
-      rows.push(row)
-    }
-  }
-
-  return rows
+interface ParsedCustomer {
+  name: string
+  phone: string
+  address: string
+  gstin: string
 }
 
 export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }: BulkUploadModalProps) {
   const t = (key: string) => getTranslation(language, key)
   const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<CustomerRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const [uploadResult, setUploadResult] = useState<any>(null)
+  const [preview, setPreview] = useState<ParsedCustomer[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [existing, setExisting] = useState<Customer[]>([])
 
-  const downloadTemplate = () => {
-    const element = document.createElement('a')
-    element.setAttribute('href', 'data:text/csv;charset=utf-8,' + encodeURIComponent(CSV_TEMPLATE))
-    element.setAttribute('download', 'customers_template.csv')
-    element.style.display = 'none'
-    document.body.appendChild(element)
-    element.click()
-    document.body.removeChild(element)
-    toast.success('Template downloaded')
+  // Load existing customers (for duplicate checks) whenever the modal opens.
+  useEffect(() => {
+    if (!isOpen) return
+    setPreview([])
+    setFile(null)
+    customerApi
+      .list()
+      .then(setExisting)
+      .catch(() => setExisting([]))
+  }, [isOpen])
+
+  const existingPhones = new Set(
+    existing.map((c) => (c.phone || '').trim()).filter(Boolean),
+  )
+  const existingGstins = new Set(
+    existing.map((c) => (c.gstin || '').trim().toLowerCase()).filter(Boolean),
+  )
+
+  const duplicateReason = (row: ParsedCustomer, idx: number): string => {
+    const phone = row.phone.trim()
+    const gstin = row.gstin.trim().toLowerCase()
+    if (phone && existingPhones.has(phone)) return 'Phone already exists'
+    if (gstin && existingGstins.has(gstin)) return 'GSTIN already exists'
+    for (let i = 0; i < idx; i++) {
+      if (phone && preview[i].phone.trim() === phone) return 'Duplicate phone in file'
+      if (gstin && preview[i].gstin.trim().toLowerCase() === gstin) return 'Duplicate GSTIN in file'
+    }
+    return ''
   }
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
     if (!selectedFile) return
-
-    if (selectedFile.type !== 'text/csv' && !selectedFile.name.endsWith('.csv')) {
+    if (!selectedFile.name.endsWith('.csv')) {
       toast.error('Please upload a CSV file')
       return
     }
-
     setFile(selectedFile)
+    parseCSV(selectedFile)
+  }
+
+  const parseCSV = (file: File) => {
     const reader = new FileReader()
     reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string
-        const rows = parseCSV(text)
-        if (rows.length === 0) {
-          toast.error('No valid data found in file')
-          return
-        }
-        setPreview(rows.slice(0, 10))
-        setUploadResult(null)
-      } catch {
-        toast.error('Error parsing CSV file')
-      }
+      const text = event.target?.result as string
+      const lines = text.split('\n').filter((line) => line.trim())
+      const dataLines = lines.slice(1)
+      const parsed: ParsedCustomer[] = dataLines.map((line) => {
+        const [name, phone, address, gstin] = line.split(',').map((s) => s.trim())
+        return { name: name || '', phone: phone || '', address: address || '', gstin: gstin || '' }
+      })
+      setPreview(parsed)
     }
-    reader.readAsText(selectedFile)
+    reader.readAsText(file)
+  }
+
+  const updateRow = (idx: number, field: keyof ParsedCustomer, value: string) => {
+    setPreview((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)))
+  }
+
+  const deleteRow = (idx: number) => {
+    setPreview((rows) => rows.filter((_, i) => i !== idx))
   }
 
   const handleUpload = async () => {
-    if (!file) {
-      toast.error('Please select a file')
+    if (preview.length === 0) {
+      toast.error('No data to upload')
       return
     }
 
-    try {
-      setLoading(true)
-      const reader = new FileReader()
-      reader.onload = async (event) => {
-        try {
-          const text = event.target?.result as string
-          const rows = parseCSV(text)
-          const customers = rows.map((row) => ({
-            name: row.name || '',
-            address: row.address || '',
-            phone: row.phone || '',
-            state: row.state || '',
-            country: row.country || '',
-            gstin: row.gstin || '',
-            acres: row.acres || '',
-            loyalty: row.loyalty || '',
-            referral: row.referral || '',
-            display_number: row.display_number || '',
-          }))
+    setUploading(true)
+    let successCount = 0
+    let failCount = 0
+    let skipped = 0
 
-          const result = await customerApi.bulkUpload(customers)
-          setUploadResult(result)
-
-          if (result.success > 0) toast.success(`Successfully added ${result.success} customer(s)`)
-          if (result.failed > 0) toast.error(`${result.failed} customer(s) failed to add`)
-        } catch (err) {
-          toast.error((err as Error).message)
-        } finally {
-          setLoading(false)
-        }
+    for (let i = 0; i < preview.length; i++) {
+      const customer = preview[i]
+      if (!customer.name.trim()) {
+        skipped++
+        continue
       }
-      reader.readAsText(file)
-    } catch (err) {
-      toast.error((err as Error).message)
-      setLoading(false)
+      if (duplicateReason(customer, i)) {
+        skipped++
+        continue
+      }
+      try {
+        await customerApi.create({
+          name: customer.name.trim(),
+          phone: customer.phone.trim(),
+          address: customer.address.trim(),
+          gstin: customer.gstin.trim(),
+          tally_ledger_name: customer.name.trim(),
+        })
+        successCount++
+      } catch {
+        failCount++
+      }
     }
-  }
 
-  const handleClose = () => {
-    setFile(null)
-    setPreview([])
-    setUploadResult(null)
-    onClose()
-  }
-
-  const handleSuccess = () => {
+    setUploading(false)
+    toast.success(
+      `${successCount} customers uploaded` +
+        (skipped > 0 ? `, ${skipped} duplicate/empty skipped` : '') +
+        (failCount > 0 ? `, ${failCount} failed` : ''),
+    )
     onSuccess()
-    handleClose()
   }
 
   if (!isOpen) return null
 
+  const inputClass =
+    'w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black'
+  const duplicateCount = preview.filter((r, i) => duplicateReason(r, i)).length
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg bg-white">
-        <div className="sticky top-0 border-b border-gray-200 bg-white p-6">
-          <h2 className="text-xl font-bold text-black">Bulk Upload Customers</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg bg-white p-6">
+        <h2 className="mb-4 text-2xl font-bold text-black">Bulk Upload Customers</h2>
+
+        <a
+          href="data:text/csv;charset=utf-8,name%2Cphone%2Caddress%2Cgstin%0AJohn%20Doe%2C9876543210%2C123%20Street%2C27AABCT1234H1Z0%0AJane%20Smith%2C9876543211%2C456%20Avenue%2C27AABCD5678H1Z0"
+          download="customers_template.csv"
+          className="mb-4 inline-flex items-center gap-2 rounded-lg bg-green-100 px-4 py-3 font-medium text-green-700 transition-colors hover:bg-green-200"
+        >
+          <Upload size={20} />
+          Download CSV Template
+        </a>
+
+        <div className="mb-4 rounded-lg border-2 border-dashed border-gray-300 p-8 text-center">
+          <input type="file" accept=".csv" onChange={handleFileChange} className="hidden" id="csv-upload" />
+          <label htmlFor="csv-upload" className="cursor-pointer">
+            <Upload className="mx-auto mb-2 text-gray-400" size={40} />
+            <p className="text-gray-600">{file ? file.name : 'Click to upload CSV'}</p>
+            <p className="text-sm text-gray-400">CSV file only</p>
+          </label>
         </div>
 
-        <div className="space-y-6 p-6">
-          {!uploadResult ? (
-            <>
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                <p className="text-sm text-blue-800">
-                  <strong>How to use:</strong> Download the template, fill in customer data in CSV format, and upload the file.
-                </p>
-              </div>
-
-              <div>
-                <button
-                  onClick={downloadTemplate}
-                  className="inline-flex items-center gap-2 rounded-md bg-green-100 px-4 py-2 text-green-700 transition-colors hover:bg-green-200"
-                >
-                  <Download size={16} />
-                  Download CSV Template
-                </button>
-              </div>
-
-              <div className="rounded-lg border-2 border-dashed border-gray-300 p-8 text-center transition-colors hover:border-gray-400">
-                <input
-                  type="file"
-                  id="customer-file-input"
-                  onChange={handleFileSelect}
-                  accept=".csv"
-                  className="hidden"
-                />
-                <label htmlFor="customer-file-input" className="inline-flex cursor-pointer flex-col items-center gap-2">
-                  <Upload size={32} className="text-gray-400" />
-                  <span className="text-sm font-medium text-gray-700">
-                    {file ? file.name : 'Click to upload or drag file here'}
-                  </span>
-                  <span className="text-xs text-gray-500">CSV file only</span>
-                </label>
-              </div>
-
-              {preview.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="text-sm font-medium text-gray-700">Preview (first 10 rows)</h3>
-                  <div className="overflow-x-auto rounded-md border border-gray-200">
-                    <table className="w-full text-xs">
-                      <thead className="bg-gray-100">
-                        <tr>
-                          <th className="px-3 py-2 text-left text-gray-700">Name</th>
-                          <th className="px-3 py-2 text-left text-gray-700">Phone</th>
-                          <th className="px-3 py-2 text-left text-gray-700">GSTIN</th>
-                          <th className="px-3 py-2 text-left text-gray-700">State</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {preview.map((row, idx) => (
-                          <tr key={idx} className="border-t border-gray-200 hover:bg-gray-50">
-                            <td className="px-3 py-2">{row.name || '—'}</td>
-                            <td className="px-3 py-2">{row.phone || '—'}</td>
-                            <td className="px-3 py-2">{row.gstin || '—'}</td>
-                            <td className="px-3 py-2">{row.state || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+        {preview.length > 0 && (
+          <div className="mb-4">
+            <h3 className="mb-2 font-semibold text-black">
+              Review &amp; edit rows
+              {duplicateCount > 0 && (
+                <span className="ml-2 text-sm font-normal text-red-600">
+                  ({duplicateCount} duplicate{duplicateCount > 1 ? 's' : ''} will be skipped)
+                </span>
               )}
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="border border-gray-200 px-3 py-2 text-left">Name</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Phone</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Address (City)</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">GSTIN</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.map((customer, idx) => {
+                    const reason = duplicateReason(customer, idx)
+                    return (
+                      <tr key={idx} className={reason ? 'bg-red-50' : ''}>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={customer.name}
+                            onChange={(e) => updateRow(idx, 'name', e.target.value)}
+                          />
+                          {reason && <p className="mt-0.5 text-xs text-red-600">{reason}</p>}
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={customer.phone}
+                            onChange={(e) => updateRow(idx, 'phone', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={customer.address}
+                            onChange={(e) => updateRow(idx, 'address', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={customer.gstin}
+                            onChange={(e) => updateRow(idx, 'gstin', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1 text-center">
+                          <button
+                            onClick={() => deleteRow(idx)}
+                            className="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">{preview.length} row(s) ready to upload</p>
+          </div>
+        )}
 
-              <div className="flex justify-center gap-3 pt-4 border-t border-gray-200">
-                <Button onClick={handleClose} className="bg-gray-300 text-gray-800 hover:bg-gray-400">
-                  Cancel
-                </Button>
-                <Button onClick={handleUpload} disabled={!file || loading} className="bg-black text-white hover:bg-gray-900 disabled:opacity-50">
-                  {loading ? 'Uploading...' : 'Upload'}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="space-y-4">
-                <div className="rounded-lg border border-green-200 bg-green-50 p-4">
-                  <p className="text-sm text-green-800"><strong>Success:</strong> {uploadResult.success} customer(s) added</p>
-                </div>
-                {uploadResult.failed > 0 && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-                    <p className="mb-2 text-sm text-red-800"><strong>Failed:</strong> {uploadResult.failed} customer(s)</p>
-                    <div className="max-h-40 overflow-y-auto">
-                      {uploadResult.errors.map((err: any, idx: number) => (
-                        <div key={idx} className="mb-1 text-xs text-red-700">
-                          Row {err.row} ({err.name}): {err.error}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex justify-center gap-3 pt-4 border-t border-gray-200">
-                <Button onClick={handleClose} className="bg-gray-300 text-gray-800 hover:bg-gray-400">
-                  Close
-                </Button>
-                <Button onClick={handleSuccess} className="bg-black text-white hover:bg-gray-900">
-                  Done
-                </Button>
-              </div>
-            </>
-          )}
+        <div className="flex justify-end gap-3">
+          <Button variant="outline" onClick={onClose} disabled={uploading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleUpload}
+            disabled={uploading || preview.length === 0}
+            className="bg-black text-white hover:bg-gray-900"
+          >
+            {uploading ? 'Uploading...' : 'Upload'}
+          </Button>
         </div>
       </div>
     </div>

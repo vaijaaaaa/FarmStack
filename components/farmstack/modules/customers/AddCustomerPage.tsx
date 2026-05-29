@@ -153,6 +153,32 @@ export default function AddCustomerPage({
         })
         toast.success('Customer updated successfully')
       } else {
+        const dupErrors: Record<string, string[]> = {}
+
+        const seen = new Set<string>()
+        customers.forEach((customer, index) => {
+          const key = customer.name.trim().toLowerCase()
+          if (seen.has(key)) {
+            dupErrors[index.toString()] = [...(dupErrors[index.toString()] || []), 'Duplicate customer name in this form']
+          } else {
+            seen.add(key)
+          }
+        })
+
+        const existing = await customerApi.list()
+        const existingNames = new Set(existing.map((c) => c.name.trim().toLowerCase()))
+        customers.forEach((customer, index) => {
+          if (existingNames.has(customer.name.trim().toLowerCase())) {
+            dupErrors[index.toString()] = [...(dupErrors[index.toString()] || []), 'A customer with this name already exists']
+          }
+        })
+
+        if (Object.keys(dupErrors).length > 0) {
+          setErrors(dupErrors)
+          toast.error('Duplicate customer name(s) found')
+          return
+        }
+
         for (const customer of customers) {
           await customerApi.create({
             ...customer,

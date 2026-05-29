@@ -31,6 +31,36 @@ const createEmptyLine = (): SaleLine => ({
   selectedSaleType: '',
 })
 
+// New-customer form shown inline from the sales invoice — mirrors the fields of
+// the Customers module so a customer can be created without leaving the sale.
+interface NewCustomerForm {
+  name: string
+  phone: string
+  aadhar_card: string
+  address: string
+  state: string
+  country: string
+  gstin: string
+  acres: string
+  loyalty: string
+  referral: string
+  display_number: string
+}
+
+const emptyNewCustomer: NewCustomerForm = {
+  name: '',
+  phone: '',
+  aadhar_card: '',
+  address: '',
+  state: '',
+  country: '',
+  gstin: '',
+  acres: '',
+  loyalty: '',
+  referral: '',
+  display_number: '',
+}
+
 // A stock batch available for a product (derived from purchase history).
 interface StockBatch {
   batchName: string
@@ -53,7 +83,7 @@ interface AllocChunk {
 
 export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps) {
   const t = (key: string) => getTranslation(language, key)
-  const { customers: mockCustomers } = useCustomers()
+  const { customers: mockCustomers, createCustomer } = useCustomers()
   const { products: mockProducts } = useProducts()
   const { invoices, createInvoice, refresh } = useSalesInvoices()
   const { invoices: purchaseInvoices } = usePurchaseInvoices()
@@ -75,6 +105,11 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerSearchBy, setCustomerSearchBy] = useState<'name' | 'city'>('name')
   const customerBoxRef = useRef<HTMLDivElement>(null)
+  // Inline "add new customer" modal launched from the customer dropdown.
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false)
+  const [savingCustomer, setSavingCustomer] = useState(false)
+  const [newCustomer, setNewCustomer] = useState<NewCustomerForm>({ ...emptyNewCustomer })
+  const [customerErrors, setCustomerErrors] = useState<string[]>([])
   const [date, setDate] = useState(todayISO)
   const [saleLines, setSaleLines] = useState<SaleLine[]>([createEmptyLine()])
 
@@ -193,6 +228,66 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
 
   const selectedCustomerLabel =
     mockCustomers.find((c) => c.id === selectedCustomerId)?.name || ''
+
+  // ----- Inline add-customer ---------------------------------------------
+  const openAddCustomer = () => {
+    setNewCustomer({ ...emptyNewCustomer, name: customerSearch.trim() })
+    setCustomerErrors([])
+    setCustomerOpen(false)
+    setShowAddCustomerModal(true)
+  }
+
+  const updateNewCustomer = (field: keyof NewCustomerForm, value: string) => {
+    setNewCustomer((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const validateNewCustomer = (c: NewCustomerForm): string[] => {
+    const errs: string[] = []
+    if (!c.name.trim()) errs.push('Customer name is required')
+    if (!c.address.trim()) errs.push('Address is required')
+    if (!c.phone.trim()) errs.push('Phone number is required')
+    if (c.phone && !/^[0-9]{10}$/.test(c.phone)) errs.push('Phone number must be 10 digits')
+    if (!c.state.trim()) errs.push('State is required')
+    if (!c.country.trim()) errs.push('Country is required')
+    if (c.gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(c.gstin)) {
+      errs.push('Invalid GSTIN format')
+    }
+    if (c.aadhar_card && !/^[0-9]{12}$/.test(c.aadhar_card)) errs.push('Aadhar card must be 12 digits')
+    return errs
+  }
+
+  const handleSaveNewCustomer = async () => {
+    const errs = validateNewCustomer(newCustomer)
+    if (
+      errs.length === 0 &&
+      mockCustomers.some((c) => c.name.trim().toLowerCase() === newCustomer.name.trim().toLowerCase())
+    ) {
+      errs.push('A customer with this name already exists')
+    }
+    if (errs.length > 0) {
+      setCustomerErrors(errs)
+      return
+    }
+
+    try {
+      setSavingCustomer(true)
+      const created = await createCustomer({
+        ...newCustomer,
+        tally_ledger_name: newCustomer.name,
+      })
+      setSelectedCustomerId(created.id)
+      setSelectedTallyName(created.tally_ledger_name || created.name)
+      setShowAddCustomerModal(false)
+      setNewCustomer({ ...emptyNewCustomer })
+      setCustomerErrors([])
+      setCustomerSearch('')
+      toast.success('Customer added successfully')
+    } catch (err) {
+      setCustomerErrors([(err as Error).message])
+    } finally {
+      setSavingCustomer(false)
+    }
+  }
 
   const priceKey = (lineIndex: number, batchName: string) => `${lineIndex}:${batchName}`
 
@@ -643,7 +738,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                               )}
                             </button>
                             {customerOpen && (
-                              <div className="absolute top-full left-0 right-0 z-20 mt-1 max-h-72 overflow-hidden rounded border border-gray-300 bg-white">
+                              <div className="absolute top-full left-0 right-0 z-20 mt-1 rounded border border-gray-300 bg-white">
                                 <div className="border-b border-gray-200 p-2">
                                   <div className="mb-2 flex gap-1 rounded-md bg-gray-100 p-0.5 text-xs">
                                     <button
@@ -716,6 +811,13 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                                     ))
                                   )}
                                 </div>
+                                <button
+                                  type="button"
+                                  onClick={openAddCustomer}
+                                  className="flex w-full items-center gap-1 border-t border-gray-200 px-3 py-2 text-left text-sm font-semibold text-green-600 hover:bg-green-50"
+                                >
+                                  + Add New Customer
+                                </button>
                               </div>
                             )}
                           </div>
@@ -924,6 +1026,173 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                 className="bg-[#6b66fc] hover:bg-[#5b56dc] text-white font-medium px-8 py-2 rounded-lg text-lg min-w-30"
               >
                 Sale
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Customer Modal */}
+      {showAddCustomerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg border border-gray-300 bg-white">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-black">Add New Customer</h3>
+              <button
+                onClick={() => {
+                  setShowAddCustomerModal(false)
+                  setCustomerErrors([])
+                }}
+                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="px-6 py-5">
+              {customerErrors.length > 0 && (
+                <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3">
+                  <p className="mb-1 text-sm font-medium text-red-800">Errors:</p>
+                  <ul className="space-y-1 text-sm text-red-700">
+                    {customerErrors.map((err, i) => (
+                      <li key={i}>• {err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Customer Name</label>
+                  <input
+                    type="text"
+                    value={newCustomer.name}
+                    onChange={(e) => updateNewCustomer('name', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter customer name"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Phone</label>
+                  <input
+                    type="tel"
+                    value={newCustomer.phone}
+                    onChange={(e) => updateNewCustomer('phone', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter phone number"
+                    maxLength={10}
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Aadhar Card</label>
+                  <input
+                    type="text"
+                    value={newCustomer.aadhar_card}
+                    onChange={(e) => updateNewCustomer('aadhar_card', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter aadhar card number"
+                    maxLength={12}
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Address</label>
+                  <input
+                    type="text"
+                    value={newCustomer.address}
+                    onChange={(e) => updateNewCustomer('address', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter city name (e.g., Bangalore)"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">State</label>
+                  <input
+                    type="text"
+                    value={newCustomer.state}
+                    onChange={(e) => updateNewCustomer('state', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter state"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Country</label>
+                  <input
+                    type="text"
+                    value={newCustomer.country}
+                    onChange={(e) => updateNewCustomer('country', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter country"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">GSTIN</label>
+                  <input
+                    type="text"
+                    value={newCustomer.gstin}
+                    onChange={(e) => updateNewCustomer('gstin', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter GSTIN"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Acres</label>
+                  <input
+                    type="text"
+                    value={newCustomer.acres}
+                    onChange={(e) => updateNewCustomer('acres', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter acres"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Loyalty</label>
+                  <input
+                    type="text"
+                    value={newCustomer.loyalty}
+                    onChange={(e) => updateNewCustomer('loyalty', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter loyalty"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Referral</label>
+                  <input
+                    type="text"
+                    value={newCustomer.referral}
+                    onChange={(e) => updateNewCustomer('referral', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter referral"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">Display Number</label>
+                  <input
+                    type="text"
+                    value={newCustomer.display_number}
+                    onChange={(e) => updateNewCustomer('display_number', e.target.value)}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    placeholder="Enter display number"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-gray-200 px-6 py-4">
+              <button
+                onClick={() => {
+                  setShowAddCustomerModal(false)
+                  setCustomerErrors([])
+                }}
+                className="rounded-md bg-gray-200 px-5 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveNewCustomer}
+                disabled={savingCustomer}
+                className="rounded-md bg-black px-5 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-50"
+              >
+                {savingCustomer ? 'Saving...' : 'Add Customer'}
               </button>
             </div>
           </div>

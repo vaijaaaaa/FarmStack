@@ -1,12 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-import { Language } from '@/types/farmstack'
+import { useEffect, useState } from 'react'
+import { Language, Product } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { productApi } from '@/src/services/api'
 import { Button } from '@/components/ui/button'
+import { Upload, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Download, Upload } from 'lucide-react'
 
 interface BulkUploadModalProps {
   language: Language
@@ -15,306 +15,242 @@ interface BulkUploadModalProps {
   onSuccess: () => void
 }
 
-const CSV_TEMPLATE = `product_name,hsn_code,unit,product_type,gst_rate,selling_price,tally_price,expiry_date
-Urea Fertilizer,31021000,kg,Fertilizer,5,450,440,2026-12-31
-Neem Pesticide,38089199,liter,Pesticide,18,320,310,2026-06-30
-Wheat Seeds,10019900,kg,Seeds,0,90,85,2027-01-31`
-
-interface ProductRow {
-  product_name?: string
-  hsn_code?: string
-  unit?: string
-  product_type?: string
-  gst_rate?: string
-  selling_price?: string
-  tally_price?: string
-  expiry_date?: string
+interface ParsedProduct {
+  name: string
+  hsn_code: string
+  unit: string
+  gst_rate: string
 }
 
-// Simple CSV parser
-function parseCSV(text: string): ProductRow[] {
-  const lines = text.split('\n').filter((line) => line.trim())
-  if (lines.length < 2) return []
-
-  const headers = lines[0].split(',').map((h) => h.trim())
-  const rows: ProductRow[] = []
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',').map((v) => v.trim())
-    const row: ProductRow = {}
-
-    headers.forEach((header, idx) => {
-      if (values[idx]) {
-        row[header as keyof ProductRow] = values[idx]
-      }
-    })
-
-    if (row.product_name) {
-      rows.push(row)
-    }
-  }
-
-  return rows
-}
-
-export default function BulkUploadModal({
-  language,
-  isOpen,
-  onClose,
-  onSuccess,
-}: BulkUploadModalProps) {
+export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }: BulkUploadModalProps) {
   const t = (key: string) => getTranslation(language, key)
   const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<ProductRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const [uploadResult, setUploadResult] = useState<any>(null)
+  const [preview, setPreview] = useState<ParsedProduct[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [existing, setExisting] = useState<Product[]>([])
 
-  const downloadTemplate = () => {
-    const element = document.createElement('a')
-    element.setAttribute('href', 'data:text/csv;charset=utf-8,' + encodeURIComponent(CSV_TEMPLATE))
-    element.setAttribute('download', 'products_template.csv')
-    element.style.display = 'none'
-    document.body.appendChild(element)
-    element.click()
-    document.body.removeChild(element)
-    toast.success('Template downloaded')
+  // Load existing products (for duplicate checks) whenever the modal opens.
+  useEffect(() => {
+    if (!isOpen) return
+    setPreview([])
+    setFile(null)
+    productApi
+      .list()
+      .then(setExisting)
+      .catch(() => setExisting([]))
+  }, [isOpen])
+
+  const existingNames = new Set(
+    existing.map((p) => (p.name || '').trim().toLowerCase()).filter(Boolean),
+  )
+
+  // Products are unique by name — flag any name that already exists or repeats.
+  const duplicateReason = (row: ParsedProduct, idx: number): string => {
+    const name = row.name.trim().toLowerCase()
+    if (!name) return ''
+    if (existingNames.has(name)) return 'Product name already exists'
+    for (let i = 0; i < idx; i++) {
+      if (preview[i].name.trim().toLowerCase() === name) return 'Duplicate name in file'
+    }
+    return ''
   }
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
     if (!selectedFile) return
-
-    const isCSV = selectedFile.type === 'text/csv'
-    const isExcel = ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(selectedFile.type)
-
-    if (!isCSV && !isExcel && !selectedFile.name.endsWith('.csv')) {
+    if (!selectedFile.name.endsWith('.csv')) {
       toast.error('Please upload a CSV file')
       return
     }
-
     setFile(selectedFile)
+    parseCSV(selectedFile)
+  }
 
+  const parseCSV = (file: File) => {
     const reader = new FileReader()
     reader.onload = (event) => {
-      try {
-        const text = event.target?.result as string
-        const rows = parseCSV(text)
-        if (rows.length === 0) {
-          toast.error('No valid data found in file')
-          return
+      const text = event.target?.result as string
+      const lines = text.split('\n').filter((line) => line.trim())
+      const dataLines = lines.slice(1)
+      const parsed: ParsedProduct[] = dataLines.map((line) => {
+        const [name, hsn_code, unit, gst_rate] = line.split(',').map((s) => s.trim())
+        return {
+          name: name || '',
+          hsn_code: hsn_code || '',
+          unit: unit || '',
+          gst_rate: gst_rate || '',
         }
-        setPreview(rows.slice(0, 10))
-        setUploadResult(null)
-      } catch (err) {
-        toast.error('Error parsing CSV file')
-      }
+      })
+      setPreview(parsed)
     }
-    reader.readAsText(selectedFile)
+    reader.readAsText(file)
+  }
+
+  const updateRow = (idx: number, field: keyof ParsedProduct, value: string) => {
+    setPreview((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)))
+  }
+
+  const deleteRow = (idx: number) => {
+    setPreview((rows) => rows.filter((_, i) => i !== idx))
   }
 
   const handleUpload = async () => {
-    if (!file) {
-      toast.error('Please select a file')
+    if (preview.length === 0) {
+      toast.error('No data to upload')
       return
     }
 
-    try {
-      setLoading(true)
+    setUploading(true)
+    let successCount = 0
+    let failCount = 0
+    let skipped = 0
 
-      const reader = new FileReader()
-      reader.onload = async (event) => {
-        try {
-          const text = event.target?.result as string
-          const rows = parseCSV(text)
-
-          const products = rows.map((row) => ({
-            name: row.product_name || '',
-            hsn_code: row.hsn_code || '',
-            unit: row.unit || '',
-            product_type: row.product_type || '',
-            gst_rate: row.gst_rate || '',
-            selling_price: row.selling_price || '',
-            tally_price: row.tally_price || '',
-            expiry_date: row.expiry_date || '',
-          }))
-
-          const result = await productApi.bulkUpload(products)
-          setUploadResult(result)
-
-          if (result.success > 0) {
-            toast.success(`Successfully added ${result.success} product(s)`)
-          }
-          if (result.failed > 0) {
-            toast.error(`${result.failed} product(s) failed to add`)
-          }
-        } catch (err) {
-          toast.error((err as Error).message)
-        } finally {
-          setLoading(false)
-        }
+    for (let i = 0; i < preview.length; i++) {
+      const product = preview[i]
+      if (!product.name.trim()) {
+        skipped++
+        continue
       }
-      reader.readAsText(file)
-    } catch (err) {
-      toast.error((err as Error).message)
-      setLoading(false)
+      if (duplicateReason(product, i)) {
+        skipped++
+        continue
+      }
+      try {
+        await productApi.create({
+          name: product.name.trim(),
+          hsn_code: product.hsn_code.trim(),
+          unit: product.unit.trim(),
+          gst_rate: parseFloat(product.gst_rate) || 0,
+        })
+        successCount++
+      } catch {
+        failCount++
+      }
     }
-  }
 
-  const handleClose = () => {
-    setFile(null)
-    setPreview([])
-    setUploadResult(null)
-    onClose()
-  }
-
-  const handleSuccess = () => {
+    setUploading(false)
+    toast.success(
+      `${successCount} products uploaded` +
+        (skipped > 0 ? `, ${skipped} duplicate/empty skipped` : '') +
+        (failCount > 0 ? `, ${failCount} failed` : ''),
+    )
     onSuccess()
-    handleClose()
   }
 
   if (!isOpen) return null
 
+  const inputClass =
+    'w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black'
+  const duplicateCount = preview.filter((r, i) => duplicateReason(r, i)).length
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
-          <h2 className="text-xl font-bold text-black">Bulk Upload Products</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg bg-white p-6">
+        <h2 className="mb-4 text-2xl font-bold text-black">Bulk Upload Products</h2>
+
+        <a
+          href="data:text/csv;charset=utf-8,name%2Chsn_code%2Cunit%2Cgst_rate%0AUrea%2C31021000%2CBags%2C5%0ASeeds%2C12099110%2CKg%2C0"
+          download="products_template.csv"
+          className="mb-4 inline-flex items-center gap-2 rounded-lg bg-green-100 px-4 py-3 font-medium text-green-700 transition-colors hover:bg-green-200"
+        >
+          <Upload size={20} />
+          Download CSV Template
+        </a>
+
+        <div className="mb-4 rounded-lg border-2 border-dashed border-gray-300 p-8 text-center">
+          <input type="file" accept=".csv" onChange={handleFileChange} className="hidden" id="csv-upload" />
+          <label htmlFor="csv-upload" className="cursor-pointer">
+            <Upload className="mx-auto mb-2 text-gray-400" size={40} />
+            <p className="text-gray-600">{file ? file.name : 'Click to upload CSV'}</p>
+            <p className="text-sm text-gray-400">CSV file only</p>
+          </label>
         </div>
 
-        <div className="p-6 space-y-6">
-          {!uploadResult ? (
-            <>
-              {/* Instructions */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-800">
-                  <strong>How to use:</strong> Download the template, fill in your product data (CSV format), and upload the file.
-                </p>
-              </div>
-
-              {/* Download Template */}
-              <div>
-                <button
-                  onClick={downloadTemplate}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-green-100 text-green-700 hover:bg-green-200 rounded-md transition-colors"
-                >
-                  <Download size={16} />
-                  Download CSV Template
-                </button>
-              </div>
-
-              {/* File Upload */}
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors">
-                <input
-                  type="file"
-                  id="product-file-input"
-                  onChange={handleFileSelect}
-                  accept=".csv"
-                  className="hidden"
-                />
-                <label
-                  htmlFor="product-file-input"
-                  className="cursor-pointer inline-flex flex-col items-center gap-2"
-                >
-                  <Upload size={32} className="text-gray-400" />
-                  <span className="text-sm font-medium text-gray-700">
-                    {file ? file.name : 'Click to upload or drag file here'}
-                  </span>
-                  <span className="text-xs text-gray-500">CSV file only</span>
-                </label>
-              </div>
-
-              {/* Preview */}
-              {preview.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="text-sm font-medium text-gray-700">Preview (first 10 rows)</h3>
-                  <div className="overflow-x-auto border border-gray-200 rounded-md">
-                    <table className="w-full text-xs">
-                      <thead className="bg-gray-100">
-                        <tr>
-                          <th className="px-3 py-2 text-left text-gray-700">Name</th>
-                          <th className="px-3 py-2 text-left text-gray-700">HSN Code</th>
-                          <th className="px-3 py-2 text-left text-gray-700">Type</th>
-                          <th className="px-3 py-2 text-left text-gray-700">Selling Price</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {preview.map((row, idx) => (
-                          <tr key={idx} className="border-t border-gray-200 hover:bg-gray-50">
-                            <td className="px-3 py-2">{row.product_name || '—'}</td>
-                            <td className="px-3 py-2">{row.hsn_code || '—'}</td>
-                            <td className="px-3 py-2">{row.product_type || '—'}</td>
-                            <td className="px-3 py-2">{row.selling_price || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <p className="text-xs text-gray-500">{preview.length} rows ready to upload</p>
-                </div>
+        {preview.length > 0 && (
+          <div className="mb-4">
+            <h3 className="mb-2 font-semibold text-black">
+              Review &amp; edit rows
+              {duplicateCount > 0 && (
+                <span className="ml-2 text-sm font-normal text-red-600">
+                  ({duplicateCount} duplicate{duplicateCount > 1 ? 's' : ''} will be skipped)
+                </span>
               )}
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="border border-gray-200 px-3 py-2 text-left">Name</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">HSN Code</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Unit</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">GST Rate</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.map((product, idx) => {
+                    const reason = duplicateReason(product, idx)
+                    return (
+                      <tr key={idx} className={reason ? 'bg-red-50' : ''}>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={product.name}
+                            onChange={(e) => updateRow(idx, 'name', e.target.value)}
+                          />
+                          {reason && <p className="mt-0.5 text-xs text-red-600">{reason}</p>}
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={product.hsn_code}
+                            onChange={(e) => updateRow(idx, 'hsn_code', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={product.unit}
+                            onChange={(e) => updateRow(idx, 'unit', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={product.gst_rate}
+                            onChange={(e) => updateRow(idx, 'gst_rate', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1 text-center">
+                          <button
+                            onClick={() => deleteRow(idx)}
+                            className="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">{preview.length} row(s) ready to upload</p>
+          </div>
+        )}
 
-              {/* Action Buttons */}
-              <div className="flex gap-3 justify-end pt-4 border-t border-gray-200">
-                <Button
-                  onClick={handleClose}
-                  className="bg-gray-300 text-gray-800 hover:bg-gray-400"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleUpload}
-                  disabled={!file || loading}
-                  className="bg-black text-white hover:bg-gray-900 disabled:opacity-50"
-                >
-                  {loading ? 'Uploading...' : 'Upload'}
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Upload Results */}
-              <div className="space-y-4">
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                  <p className="text-sm text-green-800">
-                    <strong>Success:</strong> {uploadResult.success} product(s) added
-                  </p>
-                </div>
-
-                {uploadResult.failed > 0 && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <p className="text-sm text-red-800 mb-2">
-                      <strong>Failed:</strong> {uploadResult.failed} product(s)
-                    </p>
-                    {uploadResult.errors.length > 0 && (
-                      <div className="max-h-40 overflow-y-auto">
-                        {uploadResult.errors.map((err: any, idx: number) => (
-                          <div key={idx} className="text-xs text-red-700 mb-1">
-                            Row {err.row} ({err.name}): {err.error}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Result Action Buttons */}
-              <div className="flex gap-3 justify-end pt-4 border-t border-gray-200">
-                <Button
-                  onClick={handleClose}
-                  className="bg-gray-300 text-gray-800 hover:bg-gray-400"
-                >
-                  Close
-                </Button>
-                <Button
-                  onClick={handleSuccess}
-                  className="bg-black text-white hover:bg-gray-900"
-                >
-                  Done
-                </Button>
-              </div>
-            </>
-          )}
+        <div className="flex justify-end gap-3">
+          <Button variant="outline" onClick={onClose} disabled={uploading}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleUpload}
+            disabled={uploading || preview.length === 0}
+            className="bg-black text-white hover:bg-gray-900"
+          >
+            {uploading ? 'Uploading...' : 'Upload'}
+          </Button>
         </div>
       </div>
     </div>

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { Plus, Trash2 } from 'lucide-react'
 
-const DEFAULT_UNITS = ['Kg', 'Nos', 'Bags', 'Liter']
+const DEFAULT_UNITS = ['Kg', 'Nos', 'Bags', 'Litre']
 const DEFAULT_GST_RATES = [
   { value: '18', label: '18%' },
   { value: '5', label: '5%' },

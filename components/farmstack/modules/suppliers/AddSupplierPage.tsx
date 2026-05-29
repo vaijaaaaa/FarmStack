@@ -154,6 +154,32 @@ export default function AddSupplierPage({
         })
         toast.success('Supplier updated successfully')
       } else {
+        const dupErrors: Record<string, string[]> = {}
+
+        const seen = new Set<string>()
+        suppliers.forEach((supplier, index) => {
+          const key = supplier.name.trim().toLowerCase()
+          if (seen.has(key)) {
+            dupErrors[index.toString()] = [...(dupErrors[index.toString()] || []), 'Duplicate supplier name in this form']
+          } else {
+            seen.add(key)
+          }
+        })
+
+        const existing = await supplierApi.list()
+        const existingNames = new Set(existing.map((s) => s.name.trim().toLowerCase()))
+        suppliers.forEach((supplier, index) => {
+          if (existingNames.has(supplier.name.trim().toLowerCase())) {
+            dupErrors[index.toString()] = [...(dupErrors[index.toString()] || []), 'A supplier with this name already exists']
+          }
+        })
+
+        if (Object.keys(dupErrors).length > 0) {
+          setErrors(dupErrors)
+          toast.error('Duplicate supplier name(s) found')
+          return
+        }
+
         // Create multiple suppliers
         for (const supplier of suppliers) {
           await supplierApi.create({
