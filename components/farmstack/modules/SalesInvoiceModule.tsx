@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Language, SalesInvoice } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { useCustomers, useProducts, usePurchaseInvoices, useSalesInvoices } from '@/hooks/useDatabase'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import DataTable from '../components/DataTable'
+import { ChevronDown, ChevronUp, Printer } from 'lucide-react'
 import TallyStatusCell from '../components/TallyStatusCell'
 
 // Today's date as YYYY-MM-DD (local time) for date inputs.
@@ -99,7 +99,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const { invoices: purchaseInvoices } = usePurchaseInvoices()
   const [showNewInvoice, setShowNewInvoice] = useState(false)
   const [historyTab, setHistoryTab] = useState<'all' | 'cash' | 'credit'>('all')
-  const [detailSale, setDetailSale] = useState<SalesInvoice | null>(null)
+  const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null)
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedTallyName, setSelectedTallyName] = useState('Cash')
@@ -249,84 +249,68 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   }
 
   // ----- Sales history ----------------------------------------------------
-  const columns = [
-    { key: 'customer_name', label: 'Customer' },
-    { key: 'sale_type', label: 'Sale Type' },
-    { key: 'date', label: 'Date' },
-    { key: 'product_name', label: 'Product' },
-    { key: 'batch', label: 'Batch' },
-    { key: 'quantity', label: 'Qty' },
-    { key: 'selling_price', label: 'Selling' },
-    { key: 'tax', label: 'Tax%' },
-    { key: 'total', label: 'Total' },
-    { key: 'tally', label: 'Status' },
-    { key: 'actions', label: 'Details' },
-  ]
-
+  // Sales history is invoice-level (each invoice already carries its items[]).
+  // The Cash/Credit tabs filter by the derived sale_type.
   const visibleInvoices = invoices.filter(
     (inv) => historyTab === 'all' || (inv.sale_type || 'cash') === historyTab,
   )
 
-  const tableData = visibleInvoices.flatMap((invoice) => {
-    const customer = mockCustomers.find((c) => c.id === invoice.customer_id)
-    const invoiceDate = invoice.date || new Date(invoice.created_at).toISOString().split('T')[0]
-    // Tally status/retry is shown ONLY for sales that were Tally-eligible when
-    // created — i.e. every product came from a Tally-synced purchase. This is
-    // frozen at sale time via the stored tally_sync_enabled flag; a sale of a
-    // non-synced-purchase product never gets sync/resync options.
-    const tallyEligible = Boolean(invoice.tally_sync_enabled)
+  const saleDate = (inv: SalesInvoice) =>
+    inv.date || new Date(inv.created_at).toISOString().split('T')[0]
 
-    // A sale split across multiple batches must show as ONE history row per
-    // product — group the per-batch items back together for display.
-    const byProduct = new Map<string, typeof invoice.items>()
-    for (const it of invoice.items) {
-      const key = String(it.product_id)
-      if (!byProduct.has(key)) byProduct.set(key, [])
-      byProduct.get(key)!.push(it)
+  // Open a printable sale invoice in a new window (user can Save as PDF).
+  const printSaleInvoice = (inv: SalesInvoice) => {
+    const w = window.open('', '_blank', 'width=820,height=920')
+    if (!w) {
+      toast.error('Please allow pop-ups to print the invoice')
+      return
     }
-
-    return [...byProduct.values()].map((items) => {
-      const product = mockProducts.find((p) => p.id === items[0].product_id)
-      const totalQty = items.reduce((s, i) => s + i.quantity, 0)
-      const totalAmt = items.reduce((s, i) => s + i.quantity * i.rate * (1 + i.gst / 100), 0)
-      const batches = [...new Set(items.map((i) => i.batch).filter(Boolean))]
-      const prices = [...new Set(items.map((i) => i.rate))]
-      const unit = items[0].unit || product?.unit || ''
-      return {
-        customer_name: invoice.customer_name || customer?.name || 'N/A',
-        sale_type: (invoice.sale_type || 'cash') === 'credit' ? 'Credit Sale' : 'Cash Sale',
-        date: invoiceDate,
-        product_name: product?.name || invoice.product_name || 'N/A',
-        batch: batches.length ? batches.join(', ') : '—',
-        quantity: unit ? `${totalQty} ${unit}` : totalQty,
-        selling_price: prices.length === 1 ? `Rs.${prices[0]}` : 'Multiple',
-        tax: `${items[0].gst}%`,
-        total: `Rs.${totalAmt.toFixed(2)}`,
-        tally: tallyEligible ? (
-          <TallyStatusCell
-            type="sales"
-            invoiceId={invoice.id}
-            status={invoice.tally_sync_status || 'not_synced'}
-            response={invoice.tally_response}
-            onSynced={refresh}
-          />
-        ) : (
-          <span className="text-xs text-gray-400" title="Not synced to Tally at purchase — not applicable">
-            —
-          </span>
-        ),
-        actions: (
-          <button
-            onClick={() => setDetailSale(invoice)}
-            data-kbd-row-action
-            className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
-          >
-            View Details
-          </button>
-        ),
-      }
-    })
-  })
+    const rows = inv.items
+      .map((it) => {
+        const product = mockProducts.find((p) => p.id === it.product_id)
+        const lineTotal = it.quantity * it.rate * (1 + it.gst / 100)
+        return `
+        <tr>
+          <td>${product?.name ?? 'N/A'}</td>
+          <td style="text-align:center">${it.batch || '—'}</td>
+          <td style="text-align:center">${it.quantity}${it.unit ? ' ' + it.unit : ''}</td>
+          <td style="text-align:right">₹${Number(it.rate || 0).toFixed(2)}</td>
+          <td style="text-align:center">${it.gst}%</td>
+          <td style="text-align:right">₹${lineTotal.toFixed(2)}</td>
+        </tr>`
+      })
+      .join('')
+    w.document.write(`<!doctype html><html><head><title>Invoice ${inv.invoice_number ?? ''}</title>
+      <style>
+        body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:28px}
+        h1{font-size:20px;margin:0 0 4px} .muted{color:#555;font-size:13px}
+        .meta{margin:16px 0;font-size:13px;line-height:1.6}
+        table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}
+        th,td{border:1px solid #ccc;padding:6px 8px}
+        th{background:#eee;text-align:left}
+        tfoot td{font-weight:bold}
+      </style></head><body>
+      <h1>Sales Invoice</h1>
+      <div class="muted">FarmStack</div>
+      <div class="meta">
+        <div><strong>Customer:</strong> ${inv.customer_name ?? ''}</div>
+        <div><strong>Tally Name:</strong> ${inv.tally_name ?? ''}</div>
+        <div><strong>Invoice #:</strong> ${inv.invoice_number ?? ''}</div>
+        <div><strong>Date:</strong> ${saleDate(inv)}</div>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Product</th><th>Batch</th><th>Qty</th><th>Selling Price</th><th>Tax%</th><th>Total</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="5" style="text-align:right">Grand Total</td>
+        <td style="text-align:right">₹${Number(inv.total).toFixed(2)}</td></tr></tfoot>
+      </table>
+      </body></html>`)
+    w.document.close()
+    w.focus()
+    w.print()
+  }
 
   // ----- Form handlers ----------------------------------------------------
   const updateLine = (index: number, field: keyof SaleLine, value: string) => {
@@ -1168,112 +1152,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         </div>
       )}
 
-      {/* Sale details modal */}
-      {detailSale && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
-          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg border border-gray-300 bg-white">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <h3 className="text-lg font-bold text-black">
-                Sale Details — {detailSale.invoice_number}
-              </h3>
-              <button
-                onClick={() => setDetailSale(null)}
-                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="px-6 py-4">
-              <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                <div>
-                  <span className="text-gray-500">Customer:</span>{' '}
-                  <span className="font-medium">{detailSale.customer_name || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Tally Name:</span>{' '}
-                  <span className="font-medium">{detailSale.tally_name || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Date:</span>{' '}
-                  <span className="font-medium">{detailSale.date || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Sale Type:</span>{' '}
-                  <span className="font-medium capitalize">
-                    {(detailSale.sale_type || 'cash') === 'credit' ? 'Credit Sale' : 'Cash Sale'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Status:</span>{' '}
-                  <span className="font-medium capitalize">{detailSale.status}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Tally Sync:</span>{' '}
-                  <span className="font-medium capitalize">
-                    {(detailSale.tally_sync_status || 'not_synced').replace('_', ' ')}
-                  </span>
-                </div>
-              </div>
-
-              <table className="w-full border border-gray-300 text-sm">
-                <thead className="bg-[#e0e0e0] text-gray-700">
-                  <tr>
-                    <th className="border-r border-gray-300 px-2 py-1.5 text-left">Product</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Batch</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Quantity</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Selling Price</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Tax%</th>
-                    <th className="px-2 py-1.5">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detailSale.items.map((it, i) => {
-                    const product = mockProducts.find((p) => p.id === it.product_id)
-                    const lineTotal = it.quantity * it.rate * (1 + it.gst / 100)
-                    return (
-                      <tr key={i} className="border-t border-gray-200">
-                        <td className="border-r border-gray-200 px-2 py-1.5">
-                          {product?.name || 'N/A'}
-                        </td>
-                        <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                          {it.batch || 'Primary Batch'}
-                        </td>
-                        <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                          {it.quantity} {it.unit || product?.unit || ''}
-                        </td>
-                        <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                          ₹{it.rate}
-                        </td>
-                        <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                          {it.gst}%
-                        </td>
-                        <td className="px-2 py-1.5 text-center">₹{lineTotal.toFixed(2)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-gray-300 bg-[#e0e0e0] font-semibold">
-                    <td className="border-r border-gray-300 px-2 py-2" colSpan={5}>
-                      Grand Total
-                    </td>
-                    <td className="px-2 py-2 text-center">₹{Number(detailSale.total).toFixed(2)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-            <div className="flex justify-end border-t border-gray-200 px-6 py-3">
-              <button
-                onClick={() => setDetailSale(null)}
-                className="rounded-md bg-gray-200 px-5 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {!showNewInvoice && invoices.length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-6">
           <div className="mb-4 flex items-center justify-between">
@@ -1292,7 +1170,166 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               ))}
             </div>
           </div>
-          <DataTable columns={columns} data={tableData} dense pageSize={10} />
+          <table className="w-full text-sm">
+            <thead className="border-b border-gray-200">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Customer</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Tally Name</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Date</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Total</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleInvoices.map((inv) => {
+                const customer = mockCustomers.find((c) => c.id === inv.customer_id)
+                const tallyEligible = Boolean(inv.tally_sync_enabled)
+                return (
+                  <Fragment key={inv.id}>
+                    <tr
+                      onClick={() =>
+                        setExpandedSaleId(expandedSaleId === String(inv.id) ? null : String(inv.id))
+                      }
+                      className="cursor-pointer border-b border-gray-100 hover:bg-gray-50"
+                    >
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        {inv.customer_name || customer?.name || 'N/A'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{inv.tally_name || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">{saleDate(inv)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">₹{Number(inv.total).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        {tallyEligible ? (
+                          <TallyStatusCell
+                            type="sales"
+                            invoiceId={inv.id}
+                            status={inv.tally_sync_status || 'not_synced'}
+                            response={inv.tally_response}
+                            onSynced={refresh}
+                          />
+                        ) : (
+                          <span
+                            className="text-xs text-gray-400"
+                            title="Not synced to Tally at purchase — not applicable"
+                          >
+                            —
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setExpandedSaleId(
+                                expandedSaleId === String(inv.id) ? null : String(inv.id),
+                              )
+                            }}
+                            className="rounded bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100"
+                            title="Expand / collapse"
+                          >
+                            {expandedSaleId === String(inv.id) ? (
+                              <ChevronUp size={16} />
+                            ) : (
+                              <ChevronDown size={16} />
+                            )}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              printSaleInvoice(inv)
+                            }}
+                            className="rounded bg-gray-100 px-2 py-1 text-gray-700 hover:bg-gray-200"
+                            title="Print invoice (PDF)"
+                          >
+                            <Printer size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {expandedSaleId === String(inv.id) && (
+                      <tr>
+                        <td colSpan={6} className="bg-gray-50 px-4 py-4">
+                          <p className="font-semibold text-black mb-2">Invoice Details</p>
+                          <div className="grid grid-cols-4 gap-2 text-sm text-gray-700 mb-4">
+                            <div>
+                              <span className="text-gray-500">Customer</span>
+                              <p className="font-medium text-black">
+                                {inv.customer_name || customer?.name || 'N/A'}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Tally Name</span>
+                              <p className="font-medium text-black">{inv.tally_name || '—'}</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Date</span>
+                              <p className="font-medium text-black">{saleDate(inv)}</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Sale Type</span>
+                              <p className="font-medium text-black capitalize">
+                                {(inv.sale_type || 'cash') === 'credit' ? 'Credit Sale' : 'Cash Sale'}
+                              </p>
+                            </div>
+                          </div>
+                          <table className="w-full border border-gray-300 text-sm">
+                            <thead className="bg-[#e0e0e0] text-gray-700">
+                              <tr>
+                                <th className="border-r border-gray-200 px-2 py-1.5 text-left">Product</th>
+                                <th className="border-r border-gray-200 px-2 py-1.5 text-center">Batch</th>
+                                <th className="border-r border-gray-200 px-2 py-1.5 text-center">Qty</th>
+                                <th className="border-r border-gray-200 px-2 py-1.5 text-right">Selling Price</th>
+                                <th className="border-r border-gray-200 px-2 py-1.5 text-center">Tax%</th>
+                                <th className="px-2 py-1.5 text-right">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {inv.items.map((it, i) => {
+                                const product = mockProducts.find((p) => p.id === it.product_id)
+                                const lineTotal = it.quantity * it.rate * (1 + it.gst / 100)
+                                return (
+                                  <tr key={i} className="border-t border-gray-200">
+                                    <td className="border-r border-gray-200 px-2 py-1.5">
+                                      {product?.name || 'N/A'}
+                                    </td>
+                                    <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                                      {it.batch || '—'}
+                                    </td>
+                                    <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                                      {it.quantity} {it.unit || product?.unit || ''}
+                                    </td>
+                                    <td className="border-r border-gray-200 px-2 py-1.5 text-right">
+                                      ₹{it.rate}
+                                    </td>
+                                    <td className="border-r border-gray-200 px-2 py-1.5 text-center">
+                                      {it.gst}%
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right">₹{lineTotal.toFixed(2)}</td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                            <tfoot>
+                              <tr className="border-t-2 border-gray-300 bg-[#e0e0e0] font-semibold">
+                                <td className="border-r border-gray-200 px-2 py-2" colSpan={5}>
+                                  Grand Total
+                                </td>
+                                <td className="px-2 py-2 text-right">
+                                  ₹{Number(inv.total).toFixed(2)}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
