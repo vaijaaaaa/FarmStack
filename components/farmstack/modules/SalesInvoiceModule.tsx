@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Language, SaleType, SalesInvoice } from '@/types/farmstack'
+import { Language, SalesInvoice } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
-import { useCustomers, useProducts, useProductTypes, usePurchaseInvoices, useSalesInvoices } from '@/hooks/useDatabase'
+import { useCustomers, useProducts, usePurchaseInvoices, useSalesInvoices } from '@/hooks/useDatabase'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import DataTable from '../components/DataTable'
@@ -22,14 +22,44 @@ interface SalesInvoiceModuleProps {
 interface SaleLine {
   selectedProduct: string
   quantity: string
-  selectedSaleType: string
+  sellingPrice: string
+  expiryDate: string
 }
 
 const createEmptyLine = (): SaleLine => ({
   selectedProduct: '',
   quantity: '',
-  selectedSaleType: '',
+  sellingPrice: '',
+  expiryDate: '',
 })
+
+// Map a product's category (the product master "product_type") to its Tally
+// sales ledger — e.g. "Fertilizers" -> "Sales of Fertilizers". Mirrors the
+// purchase module's toPurchaseLedger; runs only in the background.
+const CATEGORY_TO_SALES_LEDGER: Record<string, string> = {
+  fertilizer: 'Sales of Fertilizers',
+  fertilizers: 'Sales of Fertilizers',
+  micronutrient: 'Sales of Micronutrients',
+  micronutrients: 'Sales of Micronutrients',
+  pesticide: 'Sales of Pesticides',
+  pesticides: 'Sales of Pesticides',
+  seed: 'Sales of Seeds',
+  seeds: 'Sales of Seeds',
+  grain: 'Sales of Grains',
+  grains: 'Sales of Grains',
+}
+const toSalesLedger = (category: string): string => {
+  // Normalize: drop any legacy "Purchase of " / "Sales of " prefix so a product
+  // category stored as "Purchase of Fertilizer" still resolves to the base
+  // category ("fertilizer") instead of "Sales of Purchase of Fertilizer".
+  const base = (category || '')
+    .trim()
+    .replace(/^(purchase|sales)\s+of\s+/i, '')
+    .trim()
+  const key = base.toLowerCase()
+  if (!key) return ''
+  return CATEGORY_TO_SALES_LEDGER[key] || `Sales of ${base}`
+}
 
 // New-customer form shown inline from the sales invoice — mirrors the fields of
 // the Customers module so a customer can be created without leaving the sale.
@@ -87,19 +117,12 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const { products: mockProducts } = useProducts()
   const { invoices, createInvoice, refresh } = useSalesInvoices()
   const { invoices: purchaseInvoices } = usePurchaseInvoices()
-  const { productTypes, createProductType } = useProductTypes()
-  const saleTypes = productTypes.filter((type) => type.name.toLowerCase().startsWith('sales'))
-
   const [showNewInvoice, setShowNewInvoice] = useState(false)
-  const [showSaleTypePopup, setShowSaleTypePopup] = useState(false)
-  const [saleType, setSaleType] = useState<SaleType>('cash')
   const [historyTab, setHistoryTab] = useState<'all' | 'cash' | 'credit'>('all')
   const [detailSale, setDetailSale] = useState<SalesInvoice | null>(null)
-  // User overrides for a batch's selling price, keyed by "lineIndex:batchName".
-  const [priceOverrides, setPriceOverrides] = useState<Record<string, string>>({})
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
-  const [selectedTallyName, setSelectedTallyName] = useState('')
+  const [selectedTallyName, setSelectedTallyName] = useState('Cash')
   // Searchable customer dropdown — search by Name or City (address field).
   const [customerOpen, setCustomerOpen] = useState(false)
   const [customerSearch, setCustomerSearch] = useState('')
@@ -112,11 +135,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const [customerErrors, setCustomerErrors] = useState<string[]>([])
   const [date, setDate] = useState(todayISO)
   const [saleLines, setSaleLines] = useState<SaleLine[]>([createEmptyLine()])
-
-  const [showAddSaleTypeModal, setShowAddSaleTypeModal] = useState(false)
-  const [newSaleTypeName, setNewSaleTypeName] = useState('')
-  const [newSaleTypeGST, setNewSaleTypeGST] = useState('')
-  const [currentTypeIndex, setCurrentTypeIndex] = useState<number | null>(null)
 
   // Additional details modal states (for invoices > 50k)
   const [showAdditionalDetailsModal, setShowAdditionalDetailsModal] = useState(false)
@@ -276,7 +294,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         tally_ledger_name: newCustomer.name,
       })
       setSelectedCustomerId(created.id)
-      setSelectedTallyName(created.tally_ledger_name || created.name)
       setShowAddCustomerModal(false)
       setNewCustomer({ ...emptyNewCustomer })
       setCustomerErrors([])
@@ -287,15 +304,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     } finally {
       setSavingCustomer(false)
     }
-  }
-
-  const priceKey = (lineIndex: number, batchName: string) => `${lineIndex}:${batchName}`
-
-  // Selling price for an allocated batch — the user override if edited,
-  // otherwise the batch's default price from the purchase.
-  const effectivePrice = (lineIndex: number, c: AllocChunk) => {
-    const o = priceOverrides[priceKey(lineIndex, c.batchName)]
-    return o !== undefined && o !== '' ? Number(o) : c.sellingPrice
   }
 
   // ----- Sales history ----------------------------------------------------
@@ -379,24 +387,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   })
 
   // ----- Form handlers ----------------------------------------------------
-  const openCreateSale = () => {
-    if (showNewInvoice) {
-      setShowNewInvoice(false)
-      return
-    }
-    setShowSaleTypePopup(true)
-  }
-
-  const startSale = (type: SaleType) => {
-    setSaleType(type)
-    setShowSaleTypePopup(false)
-    setShowNewInvoice(true)
-    setSaleLines([createEmptyLine()])
-    setSelectedCustomerId('')
-    setSelectedTallyName('')
-    setDate(todayISO())
-  }
-
   const updateLine = (index: number, field: keyof SaleLine, value: string) => {
     const updated = [...saleLines]
     updated[index] = { ...updated[index], [field]: value }
@@ -408,60 +398,46 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       toast.error('No stock available for this product. Please add purchase stock first.')
       return
     }
-    const product = mockProducts.find((p) => p.id === productId)
-    const productType = product?.product_type?.toLowerCase()
-    const matched = saleTypes.find((s) => {
-      const n = s.name.toLowerCase()
-      return n === productType || (!!productType && n.includes(productType))
-    })
+    // Auto-fill selling price & expiry from the earliest-expiry batch (FEFO).
+    const batch = getBatchesForProduct(productId)[0]
     const updated = [...saleLines]
     updated[index] = {
       ...updated[index],
       selectedProduct: productId,
-      selectedSaleType: matched?.id || saleTypes[0]?.id || '',
+      sellingPrice: String(batch?.sellingPrice ?? ''),
+      expiryDate: batch?.expiry ?? '',
     }
     setSaleLines(updated)
   }
 
-  const handleSaleTypeChange = (index: number, saleTypeId: string) => {
-    if (saleTypeId === 'add-type') {
-      setCurrentTypeIndex(index)
-      setNewSaleTypeName('')
-      setNewSaleTypeGST('')
-      setShowAddSaleTypeModal(true)
-      return
-    }
-    updateLine(index, 'selectedSaleType', saleTypeId)
+  // A line is "complete" when its required fields are filled. Expiry is only
+  // required for seed products. Drives the Excel-like auto-row creation.
+  const isLineComplete = (line: SaleLine): boolean => {
+    if (!line.selectedProduct) return false
+    if (!(Number(line.quantity) > 0)) return false
+    if (line.sellingPrice.trim() === '') return false
+    const product = mockProducts.find((p) => p.id === line.selectedProduct)
+    if (product?.is_seed && line.expiryDate.trim() === '') return false
+    return true
   }
 
-  const handleSaveNewSaleType = async () => {
-    const typeName = newSaleTypeName.trim()
-    if (!typeName) {
-      toast.error('Please enter a type name')
-      return
-    }
-    try {
-      const normalized = typeName.toLowerCase().startsWith('sales')
-        ? typeName
-        : `Sales of ${typeName}`
-      const newType = await createProductType({
-        name: normalized,
-        description: 'Added from Sales Invoice',
-        tax: parseInt(newSaleTypeGST) || 0,
-      })
-      if (currentTypeIndex !== null) {
-        updateLine(currentTypeIndex, 'selectedSaleType', newType.id)
-      }
-      setShowAddSaleTypeModal(false)
-      setCurrentTypeIndex(null)
-      setNewSaleTypeName('')
-      setNewSaleTypeGST('')
-    } catch (err) {
-      toast.error(`Failed to add type: ${(err as Error).message}`)
-    }
-  }
+  // A line is "empty" when nothing has been entered. Trailing empty lines are
+  // auto-created placeholders and are skipped when saving.
+  const isLineEmpty = (line: SaleLine): boolean =>
+    !line.selectedProduct &&
+    !line.quantity.trim() &&
+    !line.sellingPrice.trim() &&
+    !line.expiryDate.trim()
 
-  const handleAddRow = () => setSaleLines([...saleLines, createEmptyLine()])
+  // Once the last line is fully filled, append a fresh empty line automatically.
+  useEffect(() => {
+    const last = saleLines[saleLines.length - 1]
+    if (last && isLineComplete(last)) {
+      setSaleLines((prev) => [...prev, createEmptyLine()])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saleLines])
+
   const handleRemoveRow = (i: number) => setSaleLines(saleLines.filter((_, idx) => idx !== i))
 
   const resetAdditionalDetailsForm = () => {
@@ -479,10 +455,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   }
 
   const buildPayload = (): Record<string, unknown> | null => {
-    if (!selectedCustomerId) {
-      toast.error('Please select a customer name')
-      return null
-    }
     if (!selectedTallyName) {
       toast.error('Please select a Tally name')
       return null
@@ -491,15 +463,17 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       toast.error('Please select a sale date')
       return null
     }
-    if (saleLines.length === 0) {
+    // Trailing empty lines (auto-created placeholders) are ignored on save.
+    const activeLines = saleLines.filter((l) => !isLineEmpty(l))
+    if (activeLines.length === 0) {
       toast.error('Please add at least one product')
       return null
     }
 
     const items: Array<Record<string, unknown>> = []
     let total = 0
-    for (let i = 0; i < saleLines.length; i++) {
-      const line = saleLines[i]
+    for (let i = 0; i < activeLines.length; i++) {
+      const line = activeLines[i]
       const label = `Item ${i + 1}`
       if (!line.selectedProduct) {
         toast.error(`${label}: Please select a product.`)
@@ -510,25 +484,27 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         toast.error(`${label}: Quantity is required and must be greater than 0.`)
         return null
       }
-      if (!line.selectedSaleType) {
-        toast.error(`${label}: Please select a Sales Ledger / Type.`)
+      if (line.sellingPrice.trim() === '') {
+        toast.error(`${label}: Selling Price is required.`)
         return null
       }
-      const { chunks, shortfall } = allocate(line.selectedProduct, qty)
       const product = mockProducts.find((p) => p.id === line.selectedProduct)
       const name = product?.name || 'this product'
       const unit = product?.unit || ''
+      if (product?.is_seed && line.expiryDate.trim() === '') {
+        toast.error(`${label}: Expiry Date is required for seed products.`)
+        return null
+      }
+      const { chunks, shortfall } = allocate(line.selectedProduct, qty)
       if (shortfall > 0.0001) {
         const avail = availableStock(line.selectedProduct)
         toast.error(`Only ${avail} ${unit} available for ${name}.`)
         return null
       }
       const gst = productGst(line.selectedProduct)
-      const ledgerName = saleTypes.find((s) => s.id === line.selectedSaleType)?.name || ''
+      const price = Number(line.sellingPrice || '0')
+      // Each FEFO chunk is sold at the row's entered selling price.
       for (const c of chunks) {
-        const price = effectivePrice(i, c)
-        const lineTotal = c.qty * price * (1 + gst / 100)
-        total += lineTotal
         items.push({
           product_id: line.selectedProduct,
           batch: c.batchName,
@@ -536,19 +512,28 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
           rate: price,
           tally_price: c.tallyPrice,
           gst,
-          type: ledgerName,
+          // Category from the product master → Tally sales ledger, e.g.
+          // "Fertilizers" → "Sales of Fertilizers". Mapped automatically.
+          type: toSalesLedger(product?.product_type || ''),
           unit: c.unit || unit,
+          expiry_date: c.expiry || line.expiryDate || '',
         })
       }
+      // Header Total = qty × entered selling price (no GST), matches header.
+      total += qty * price
     }
 
+    // Cash vs customer party ledger: when Tally Name is "Cash" the sale posts
+    // under Cash (cash sale); any customer name posts under that customer
+    // (credit sale). The Tally party ledger always follows tally_name.
+    const isCash = selectedTallyName.trim().toLowerCase() === 'cash'
     const customer = mockCustomers.find((c) => c.id === selectedCustomerId)
     return {
       customer_id: selectedCustomerId,
       customer_name: customer?.name || '',
       tally_name: selectedTallyName,
       date,
-      sale_type: saleType,
+      sale_type: isCash ? 'cash' : 'credit',
       status: 'saved',
       items,
       total,
@@ -561,7 +546,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       setShowNewInvoice(false)
       setSaleLines([createEmptyLine()])
       setSelectedCustomerId('')
-      setSelectedTallyName('')
+      setSelectedTallyName('Cash')
       setDate(todayISO())
       // Tally sync happens automatically for products that were purchased with
       // Tally sync on; result.tally is present only when a sync was attempted.
@@ -630,387 +615,249 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     resetAdditionalDetailsForm()
   }
 
+  // Header Total Amount = sum of (quantity × selling price) across all rows.
+  const salesTotal = saleLines.reduce(
+    (sum, l) => sum + Number(l.quantity || '0') * Number(l.sellingPrice || '0'),
+    0,
+  )
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-black">{t('sales_invoice')}</h2>
-        <Button onClick={openCreateSale} className="bg-black text-white hover:bg-gray-900">
+        <Button
+          onClick={() => setShowNewInvoice(!showNewInvoice)}
+          className="bg-black text-white hover:bg-gray-900"
+        >
           {showNewInvoice ? 'Cancel' : 'Create Sale'}
         </Button>
       </div>
 
-      {/* Cash / Credit sale-type popup */}
-      {showSaleTypePopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
-          <div className="w-full max-w-sm rounded-lg border border-gray-300 bg-white p-6">
-            <h3 className="mb-1 text-lg font-bold text-black">Select Sale Type</h3>
-            <p className="mb-5 text-sm text-gray-600">
-              Choose how this sale was settled. Both open the same sales form.
-            </p>
-            <div className="flex gap-4">
-              <button
-                onClick={() => startSale('cash')}
-                className="flex-1 rounded-lg border-2 border-green-500 bg-green-50 px-4 py-4 font-semibold text-green-700 hover:bg-green-100"
-              >
-                Cash Sale
-              </button>
-              <button
-                onClick={() => startSale('credit')}
-                className="flex-1 rounded-lg border-2 border-blue-500 bg-blue-50 px-4 py-4 font-semibold text-blue-700 hover:bg-blue-100"
-              >
-                Credit Sale
-              </button>
-            </div>
-            <div className="mt-5 text-right">
-              <button
-                onClick={() => setShowSaleTypePopup(false)}
-                className="rounded-md bg-gray-200 px-4 py-2 text-sm text-gray-800 hover:bg-gray-300"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {showNewInvoice && (
         <div data-kbd-scope className="rounded-lg bg-white p-2 shadow-sm border border-gray-200">
           <div className="p-6">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h3 className="text-xl font-bold text-black">New Sale</h3>
-                <span
-                  className={`mt-1 inline-block rounded-full px-3 py-0.5 text-xs font-semibold ${
-                    saleType === 'credit'
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-green-100 text-green-700'
-                  }`}
-                >
-                  {saleType === 'credit' ? 'Credit Sale' : 'Cash Sale'}
-                </span>
-              </div>
-              <div className="flex flex-col items-end gap-3">
-                <Button onClick={handleAddRow} className="bg-blue-500 hover:bg-blue-600 text-white text-sm h-8 rounded-md px-4">
-                  Add new Sale
-                </Button>
-                <div className="flex flex-col items-end gap-1">
+            <h3 className="text-xl font-bold text-black mb-6">New Sale</h3>
+
+            {/* Header fields: Customer Name | Tally Name | Sale Date | Total */}
+            <div className="mb-8">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">
+                {/* Customer Name — searchable dropdown */}
+                <div ref={customerBoxRef} className="relative flex flex-col gap-1">
+                  <label className="text-gray-700 font-medium text-xs">Customer Name</label>
+                  <button
+                    type="button"
+                    onClick={() => setCustomerOpen((o) => !o)}
+                    className="w-full rounded-md border border-gray-400 bg-gray-50 px-3 py-2 text-left text-sm text-gray-700 focus:outline-none"
+                  >
+                    {selectedCustomerLabel || (
+                      <span className="text-gray-400">Select Customer Name</span>
+                    )}
+                  </button>
+                  {customerOpen && (
+                    <div className="absolute top-full left-0 right-0 z-20 mt-1 rounded border border-gray-300 bg-white">
+                      <div className="border-b border-gray-200 p-2">
+                        <div className="mb-2 flex gap-1 rounded-md bg-gray-100 p-0.5 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setCustomerSearchBy('name')}
+                            className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
+                              customerSearchBy === 'name'
+                                ? 'bg-white text-black'
+                                : 'text-gray-600 hover:text-black'
+                            }`}
+                          >
+                            By Name
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCustomerSearchBy('city')}
+                            className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
+                              customerSearchBy === 'city'
+                                ? 'bg-white text-black'
+                                : 'text-gray-600 hover:text-black'
+                            }`}
+                          >
+                            By City
+                          </button>
+                        </div>
+                        <input
+                          autoFocus
+                          type="text"
+                          value={customerSearch}
+                          onChange={(e) => setCustomerSearch(e.target.value)}
+                          placeholder={
+                            customerSearchBy === 'city'
+                              ? 'Search city...'
+                              : 'Search customer name...'
+                          }
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto">
+                        {filteredCustomers.length === 0 ? (
+                          <div className="px-3 py-3 text-center text-xs text-gray-500">
+                            No customers found
+                          </div>
+                        ) : (
+                          filteredCustomers.map((customer) => (
+                            <button
+                              type="button"
+                              key={customer.id}
+                              onClick={() => {
+                                setSelectedCustomerId(customer.id)
+                                setCustomerOpen(false)
+                                setCustomerSearch('')
+                              }}
+                              className={`flex w-full items-start justify-between gap-3 border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-blue-50 ${
+                                customer.id === selectedCustomerId
+                                  ? 'bg-blue-50 font-medium'
+                                  : ''
+                              }`}
+                            >
+                              <span>{customer.name}</span>
+                              {customer.address && (
+                                <span className="text-xs text-gray-500">
+                                  {customer.address}
+                                </span>
+                              )}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={openAddCustomer}
+                        className="flex w-full items-center gap-1 border-t border-gray-200 px-3 py-2 text-left text-sm font-semibold text-green-600 hover:bg-green-50"
+                      >
+                        + Add New Customer
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tally Name — defaults to Cash */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-gray-700 font-medium text-xs">Tally Name</label>
+                  <select
+                    value={selectedTallyName}
+                    onChange={(e) => setSelectedTallyName(e.target.value)}
+                    className="w-full rounded-md border border-gray-400 px-3 py-2 text-sm text-gray-700 bg-gray-50 focus:outline-none"
+                  >
+                    <option value="Cash">Cash</option>
+                    {mockCustomers.map((customer) => (
+                      <option key={customer.id} value={customer.name}>
+                        {customer.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Sale Date */}
+                <div className="flex flex-col gap-1">
                   <label className="text-gray-700 font-medium text-xs">Sale Date</label>
                   <input
                     type="date"
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
-                    className="w-40 rounded-md border border-gray-400 px-3 py-1 text-center text-gray-700 bg-gray-50 focus:outline-none text-sm"
+                    className="w-full rounded-md border border-gray-400 px-3 py-2 text-center text-gray-700 bg-gray-50 focus:outline-none text-sm"
+                  />
+                </div>
+
+                {/* Total Amount — auto-calculated, read-only */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-gray-700 font-medium text-xs">Total Amount</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={`₹${salesTotal.toFixed(2)}`}
+                    className="w-full rounded-md border border-gray-400 px-3 py-2 text-center text-gray-800 bg-gray-100 font-semibold focus:outline-none"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="space-y-4">
-              {saleLines.map((line, index) => {
-                const productId = line.selectedProduct
-                const qtyNum = Number(line.quantity || 0)
-                const { chunks, shortfall } = productId
-                  ? allocate(productId, qtyNum)
-                  : { chunks: [] as AllocChunk[], shortfall: 0 }
-                const gst = productGst(productId)
-                const unit = mockProducts.find((p) => p.id === productId)?.unit || ''
-                const avail = productId ? availableStock(productId) : 0
-
-                return (
-                  <div key={index} className="rounded-lg border border-gray-300 bg-[#f6f6f6] p-4">
-                    <div className="flex flex-wrap items-end gap-4">
-                      {index === 0 && (
-                        <>
-                          <div
-                            ref={customerBoxRef}
-                            className="relative flex flex-col flex-1 min-w-[200px]"
+            <div className="w-full overflow-x-auto border border-gray-300 rounded-lg">
+              <table className="w-full text-sm text-center">
+                <thead className="bg-[#e0e0e0] text-gray-800 border-b border-gray-300">
+                  <tr>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Name</th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity <span className="text-red-500">*</span></th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Selling Price <span className="text-red-500">*</span></th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">
+                      Expiry Date
+                      {saleLines.some(
+                        (l) => mockProducts.find((p) => p.id === l.selectedProduct)?.is_seed,
+                      ) && <span className="text-red-500"> *</span>}
+                    </th>
+                    <th className="py-3 px-2 font-semibold whitespace-nowrap"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {saleLines.map((line, index) => {
+                    const unit = mockProducts.find((p) => p.id === line.selectedProduct)?.unit || ''
+                    return (
+                      <tr key={index} className="border-b border-gray-300 bg-[#ebebeb]">
+                        <td className="p-2 border-r border-gray-300 align-middle">
+                          <select
+                            value={line.selectedProduct}
+                            onChange={(e) => handleProductSelect(index, e.target.value)}
+                            className="w-full border border-gray-400 rounded p-1 bg-white text-xs"
                           >
-                            <label className="mb-1 text-xs font-medium text-gray-600">
-                              Customer Name
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => setCustomerOpen((o) => !o)}
-                              className="w-full rounded border border-gray-400 bg-white p-2 text-left text-sm focus:outline-none"
-                            >
-                              {selectedCustomerLabel || (
-                                <span className="text-gray-400">Select Customer Name</span>
-                              )}
-                            </button>
-                            {customerOpen && (
-                              <div className="absolute top-full left-0 right-0 z-20 mt-1 rounded border border-gray-300 bg-white">
-                                <div className="border-b border-gray-200 p-2">
-                                  <div className="mb-2 flex gap-1 rounded-md bg-gray-100 p-0.5 text-xs">
-                                    <button
-                                      type="button"
-                                      onClick={() => setCustomerSearchBy('name')}
-                                      className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
-                                        customerSearchBy === 'name'
-                                          ? 'bg-white text-black'
-                                          : 'text-gray-600 hover:text-black'
-                                      }`}
-                                    >
-                                      By Name
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setCustomerSearchBy('city')}
-                                      className={`flex-1 rounded px-2 py-1 font-medium transition-colors ${
-                                        customerSearchBy === 'city'
-                                          ? 'bg-white text-black'
-                                          : 'text-gray-600 hover:text-black'
-                                      }`}
-                                    >
-                                      By City
-                                    </button>
-                                  </div>
-                                  <input
-                                    autoFocus
-                                    type="text"
-                                    value={customerSearch}
-                                    onChange={(e) => setCustomerSearch(e.target.value)}
-                                    placeholder={
-                                      customerSearchBy === 'city'
-                                        ? 'Search city...'
-                                        : 'Search customer name...'
-                                    }
-                                    className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
-                                  />
-                                </div>
-                                <div className="max-h-48 overflow-y-auto">
-                                  {filteredCustomers.length === 0 ? (
-                                    <div className="px-3 py-3 text-center text-xs text-gray-500">
-                                      No customers found
-                                    </div>
-                                  ) : (
-                                    filteredCustomers.map((customer) => (
-                                      <button
-                                        type="button"
-                                        key={customer.id}
-                                        onClick={() => {
-                                          setSelectedCustomerId(customer.id)
-                                          setSelectedTallyName(
-                                            customer.tally_ledger_name || customer.name,
-                                          )
-                                          setCustomerOpen(false)
-                                          setCustomerSearch('')
-                                        }}
-                                        className={`flex w-full items-start justify-between gap-3 border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-blue-50 ${
-                                          customer.id === selectedCustomerId
-                                            ? 'bg-blue-50 font-medium'
-                                            : ''
-                                        }`}
-                                      >
-                                        <span>{customer.name}</span>
-                                        {customer.address && (
-                                          <span className="text-xs text-gray-500">
-                                            {customer.address}
-                                          </span>
-                                        )}
-                                      </button>
-                                    ))
-                                  )}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={openAddCustomer}
-                                  className="flex w-full items-center gap-1 border-t border-gray-200 px-3 py-2 text-left text-sm font-semibold text-green-600 hover:bg-green-50"
-                                >
-                                  + Add New Customer
-                                </button>
-                              </div>
+                            <option value="">Select a Product</option>
+                            {mockProducts.map((product) => (
+                              <option key={product.id} value={product.id}>{product.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="p-2 border-r border-gray-300 align-middle">
+                          <div className="flex items-center justify-center gap-1">
+                            <input
+                              type="number"
+                              value={line.quantity}
+                              onChange={(e) => updateLine(index, 'quantity', e.target.value)}
+                              placeholder="0"
+                              className="w-16 text-center border border-gray-400 rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1"
+                            />
+                            {unit && (
+                              <span className="text-xs font-medium text-gray-600 whitespace-nowrap">
+                                {unit}
+                              </span>
                             )}
                           </div>
-
-                          <div className="flex flex-col flex-1 min-w-[160px]">
-                            <label className="mb-1 text-xs font-medium text-gray-600">
-                              Tally Name
-                            </label>
-                            <select
-                              value={selectedTallyName}
-                              onChange={(e) => setSelectedTallyName(e.target.value)}
-                              className="w-full rounded border border-gray-400 p-2 text-sm bg-white focus:outline-none"
-                            >
-                              <option value="">Select Tally Name</option>
-                              {mockCustomers.map((customer) => (
-                                <option
-                                  key={customer.id}
-                                  value={customer.tally_ledger_name || customer.name}
-                                >
-                                  {customer.tally_ledger_name || customer.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </>
-                      )}
-
-                      <div className="flex flex-col flex-1 min-w-[160px]">
-                        <label className="mb-1 text-xs font-medium text-gray-600">Product</label>
-                        <select
-                          value={line.selectedProduct}
-                          onChange={(e) => handleProductSelect(index, e.target.value)}
-                          className="w-full border border-gray-400 rounded p-2 bg-white text-sm"
-                        >
-                          <option value="">Select a Product</option>
-                          {mockProducts.map((product) => (
-                            <option key={product.id} value={product.id}>
-                              {product.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="flex flex-col w-28">
-                        <label className="mb-1 text-xs font-medium text-gray-600">
-                          Quantity <span className="text-red-500">*</span>
-                        </label>
-                        <div className="flex items-center gap-1">
+                        </td>
+                        <td className="p-2 border-r border-gray-300 align-middle">
                           <input
                             type="number"
-                            value={line.quantity}
-                            onChange={(e) => updateLine(index, 'quantity', e.target.value)}
-                            placeholder="0"
-                            className="w-full text-center border border-gray-400 rounded bg-white p-2 text-sm focus:outline-none"
+                            value={line.sellingPrice}
+                            onChange={(e) => updateLine(index, 'sellingPrice', e.target.value)}
+                            placeholder="0.00"
+                            className="w-20 text-center border border-gray-400 rounded bg-white text-gray-800 focus:outline-none p-1 placeholder-gray-500"
                           />
-                          {unit && (
-                            <span className="text-xs font-medium text-gray-600 whitespace-nowrap">
-                              {unit}
-                            </span>
+                        </td>
+                        <td className="p-2 border-r border-gray-300 align-middle">
+                          <input
+                            type="date"
+                            value={line.expiryDate}
+                            onChange={(e) => updateLine(index, 'expiryDate', e.target.value)}
+                            className="w-28 bg-white border border-gray-400 rounded text-center focus:outline-none p-1 text-gray-800 text-xs"
+                          />
+                        </td>
+                        <td className="p-2 align-middle">
+                          {saleLines.length > 1 && (
+                            <button
+                              onClick={() => handleRemoveRow(index)}
+                              className="text-red-500 hover:text-red-700 font-bold text-lg px-2"
+                              title="Remove item"
+                            >
+                              &times;
+                            </button>
                           )}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col flex-1 min-w-[150px]">
-                        <label className="mb-1 text-xs font-medium text-gray-600">
-                          Sales Ledger / Type <span className="text-red-500">*</span>
-                        </label>
-                        <select
-                          value={line.selectedSaleType}
-                          onChange={(e) => handleSaleTypeChange(index, e.target.value)}
-                          className="w-full bg-white border border-gray-400 rounded p-2 text-sm focus:outline-none"
-                        >
-                          <option value="">Select type</option>
-                          {saleTypes.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.name}
-                            </option>
-                          ))}
-                          <option value="add-type" className="text-green-600 font-semibold">
-                            + Add New Type
-                          </option>
-                        </select>
-                      </div>
-
-                      {saleLines.length > 1 && (
-                        <button
-                          onClick={() => handleRemoveRow(index)}
-                          className="mb-2 text-red-500 hover:text-red-700 font-bold text-xl"
-                          title="Remove product"
-                        >
-                          &times;
-                        </button>
-                      )}
-                    </div>
-
-                    {productId && (
-                      <div
-                        className={`mt-1 text-xs font-medium ${
-                          avail > 0 ? 'text-green-700' : 'text-red-600'
-                        }`}
-                      >
-                        Available Stock: {avail} {unit}
-                      </div>
-                    )}
-
-                    {/* Batch-wise allocation breakdown */}
-                    {productId && qtyNum > 0 && (
-                      <div className="mt-3 overflow-hidden rounded border border-gray-300">
-                        <table className="w-full text-xs text-center">
-                          <thead className="bg-[#e0e0e0] text-gray-700">
-                            <tr>
-                              <th className="py-1.5 px-2 border-r border-gray-300">Batch</th>
-                              <th className="py-1.5 px-2 border-r border-gray-300">Expiry Date</th>
-                              <th className="py-1.5 px-2 border-r border-gray-300">Quantity</th>
-                              <th className="py-1.5 px-2 border-r border-gray-300">Selling Price</th>
-                              <th className="py-1.5 px-2 border-r border-gray-300">Tax%</th>
-                              <th className="py-1.5 px-2">Total (Inc.GST)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {chunks.map((c, ci) => {
-                              const price = effectivePrice(index, c)
-                              const rowTotal = c.qty * price * (1 + gst / 100)
-                              return (
-                                <tr key={ci} className="border-t border-gray-200 bg-white">
-                                  <td className="py-1.5 px-2 border-r border-gray-200">
-                                    {c.batchName || 'Primary Batch'}
-                                  </td>
-                                  <td className="py-1.5 px-2 border-r border-gray-200">
-                                    {c.expiry || '—'}
-                                  </td>
-                                  <td className="py-1.5 px-2 border-r border-gray-200">
-                                    {c.qty} {c.unit || unit}
-                                  </td>
-                                  <td className="py-1.5 px-2 border-r border-gray-200">
-                                    <div className="flex items-center justify-center gap-1">
-                                      <span>₹</span>
-                                      <input
-                                        type="number"
-                                        value={
-                                          priceOverrides[priceKey(index, c.batchName)] ??
-                                          String(c.sellingPrice)
-                                        }
-                                        onChange={(e) =>
-                                          setPriceOverrides({
-                                            ...priceOverrides,
-                                            [priceKey(index, c.batchName)]: e.target.value,
-                                          })
-                                        }
-                                        className="w-24 text-center border border-gray-300 rounded p-1 focus:outline-none"
-                                      />
-                                    </div>
-                                  </td>
-                                  <td className="py-1.5 px-2 border-r border-gray-200">{gst}%</td>
-                                  <td className="py-1.5 px-2">₹{rowTotal.toFixed(2)}</td>
-                                </tr>
-                              )
-                            })}
-                            {shortfall > 0.0001 && (
-                              <tr className="border-t border-gray-200 bg-red-50">
-                                <td colSpan={6} className="py-1.5 px-2 text-red-600 font-medium">
-                                  Only {avail} {unit} available — reduce the quantity.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                          <tfoot>
-                            {(() => {
-                              const totalQty = chunks.reduce((s, c) => s + c.qty, 0)
-                              const grandTotal = chunks.reduce(
-                                (s, c) => s + c.qty * effectivePrice(index, c) * (1 + gst / 100),
-                                0,
-                              )
-                              return (
-                                <tr className="border-t-2 border-gray-300 bg-[#e0e0e0] font-semibold text-gray-800">
-                                  <td className="py-2 px-2 border-r border-gray-300">Total</td>
-                                  <td className="py-2 px-2 border-r border-gray-300" />
-                                  <td className="py-2 px-2 border-r border-gray-300">
-                                    {totalQty} {unit}
-                                  </td>
-                                  <td className="py-2 px-2 border-r border-gray-300" />
-                                  <td className="py-2 px-2 border-r border-gray-300" />
-                                  <td className="py-2 px-2">₹{grandTotal.toFixed(2)}</td>
-                                </tr>
-                              )
-                            })()}
-                          </tfoot>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
 
             <div className="flex items-center justify-center gap-6 mt-8 pb-4">
@@ -1199,71 +1046,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         </div>
       )}
 
-      {/* Add Sale Type Modal */}
-      {showAddSaleTypeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
-          <div className="bg-white p-6 rounded-lg min-w-96 border border-gray-300">
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="text-xl font-bold text-black">Add Sales Type</h3>
-              <button
-                onClick={() => {
-                  setShowAddSaleTypeModal(false)
-                  setCurrentTypeIndex(null)
-                  setNewSaleTypeName('')
-                  setNewSaleTypeGST('')
-                }}
-                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">Type Name</label>
-                <input
-                  type="text"
-                  value={newSaleTypeName}
-                  onChange={(e) => setNewSaleTypeName(e.target.value)}
-                  placeholder="e.g., Sales of Spices"
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                  autoFocus
-                />
-              </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">GST Percentage (%)</label>
-                <input
-                  type="number"
-                  value={newSaleTypeGST}
-                  onChange={(e) => setNewSaleTypeGST(e.target.value)}
-                  placeholder="e.g., 5, 12, 18"
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                  min="0"
-                  max="100"
-                />
-              </div>
-              <div className="flex justify-center gap-4 mt-2">
-                <button
-                  onClick={() => {
-                    setShowAddSaleTypeModal(false)
-                    setCurrentTypeIndex(null)
-                    setNewSaleTypeName('')
-                    setNewSaleTypeGST('')
-                  }}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveNewSaleType}
-                  className="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-2 rounded-lg"
-                >
-                  Add Type
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Additional Details Modal for Sales > 50k */}
       {showAdditionalDetailsModal && (
