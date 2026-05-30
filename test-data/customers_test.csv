@@ -1,0 +1,9 @@
+name,phone,aadhar_card,address,state,country,gstin,acres,loyalty,referral,display_number
+Ramesh Kumar,9988700001,123456780001,Pune,Maharashtra,India,27AABCR1234H1Z0,5,Gold,Walk-in,C001
+Sita Devi,9988700002,123456780002,Bengaluru,Karnataka,India,29AABCS5678H1Z5,3,Silver,Ramesh Kumar,C002
+Arjun Reddy,9988700003,123456780003,Hyderabad,Telangana,India,36AABCA9012H1Z3,8,Gold,Walk-in,C003
+Meena Iyer,9988700004,123456780004,Chennai,Tamil Nadu,India,33AABCM3456H1Z7,2,Bronze,Sita Devi,C004
+Vikram Singh,9988700005,123456780005,Jaipur,Rajasthan,India,08AABCV7890H1Z9,10,Gold,Walk-in,C005
+Anil Joshi,9988700006,123456780006,Ahmedabad,Gujarat,India,24AABCJ2345H1Z1,4,Silver,Arjun Reddy,C006
+Priya Nair,9988700007,123456780007,Kochi,Kerala,India,32AABCP6789H1Z4,6,Bronze,Walk-in,C007
+Suresh Patel,9988700008,123456780008,Surat,Gujarat,India,24AABCS0123H1Z6,7,Gold,Meena Iyer,C008

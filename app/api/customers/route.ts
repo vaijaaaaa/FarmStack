@@ -50,7 +50,7 @@ export async function GET(request: Request) {
     const total = countResult[0]?.count || 0
 
     const rows = await query(
-      `SELECT id, name, kannada_name, phone, address, kannada_address, state, country, gstin, acres, loyalty, referral, display_number, tally_ledger_name, tally_sync_status, tally_response, tally_synced_at, created_at FROM customers ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      `SELECT id, name, kannada_name, phone, address, kannada_address, state, country, gstin, acres, loyalty, referral, display_number, aadhar_card, tally_ledger_name, tally_sync_status, tally_response, tally_synced_at, created_at FROM customers ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     )
 
@@ -92,12 +92,13 @@ export async function POST(request: Request) {
       loyalty: String(body.loyalty ?? ''),
       referral: String(body.referral ?? ''),
       display_number: String(body.display_number ?? ''),
+      aadhar_card: String(body.aadhar_card ?? ''),
       tally_ledger_name: String(body.tally_ledger_name ?? name),
     }
 
     await execute(
-      `INSERT INTO customers (id, name, kannada_name, phone, address, kannada_address, state, country, gstin, acres, loyalty, referral, display_number, tally_ledger_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO customers (id, name, kannada_name, phone, address, kannada_address, state, country, gstin, acres, loyalty, referral, display_number, aadhar_card, tally_ledger_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customer.id,
         customer.name,
@@ -112,6 +113,7 @@ export async function POST(request: Request) {
         customer.loyalty,
         customer.referral,
         customer.display_number,
+        customer.aadhar_card,
         customer.tally_ledger_name,
         nowIso(),
       ],
@@ -155,6 +157,7 @@ export async function PUT(request: Request) {
         loyalty = ?,
         referral = ?,
         display_number = ?,
+        aadhar_card = ?,
         tally_ledger_name = ?
       WHERE id = ?`,
       [
@@ -170,6 +173,7 @@ export async function PUT(request: Request) {
         String(body.loyalty ?? ''),
         String(body.referral ?? ''),
         String(body.display_number ?? ''),
+        String(body.aadhar_card ?? ''),
         String(body.tally_ledger_name ?? name),
         id,
       ],

@@ -18,8 +18,15 @@ interface BulkUploadModalProps {
 interface ParsedCustomer {
   name: string
   phone: string
+  aadhar_card: string
   address: string
+  state: string
+  country: string
   gstin: string
+  acres: string
+  loyalty: string
+  referral: string
+  display_number: string
 }
 
 export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }: BulkUploadModalProps) {
@@ -70,15 +77,54 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
     parseCSV(selectedFile)
   }
 
+  const EXPECTED_HEADERS = [
+    'name',
+    'phone',
+    'aadhar_card',
+    'address',
+    'state',
+    'country',
+    'gstin',
+    'acres',
+    'loyalty',
+    'referral',
+    'display_number',
+  ]
+
   const parseCSV = (file: File) => {
     const reader = new FileReader()
     reader.onload = (event) => {
       const text = event.target?.result as string
       const lines = text.split('\n').filter((line) => line.trim())
+      const headers = (lines[0] || '').split(',').map((h) => h.trim().toLowerCase())
+      const headersMatch =
+        headers.length === EXPECTED_HEADERS.length &&
+        EXPECTED_HEADERS.every((h, i) => headers[i] === h)
+      if (!headersMatch) {
+        toast.error(
+          `Invalid columns. This must be a customer CSV with columns: ${EXPECTED_HEADERS.join(', ')}`,
+        )
+        setFile(null)
+        setPreview([])
+        return
+      }
       const dataLines = lines.slice(1)
       const parsed: ParsedCustomer[] = dataLines.map((line) => {
-        const [name, phone, address, gstin] = line.split(',').map((s) => s.trim())
-        return { name: name || '', phone: phone || '', address: address || '', gstin: gstin || '' }
+        const [name, phone, aadhar_card, address, state, country, gstin, acres, loyalty, referral, display_number] =
+          line.split(',').map((s) => s.trim())
+        return {
+          name: name || '',
+          phone: phone || '',
+          aadhar_card: aadhar_card || '',
+          address: address || '',
+          state: state || '',
+          country: country || '',
+          gstin: gstin || '',
+          acres: acres || '',
+          loyalty: loyalty || '',
+          referral: referral || '',
+          display_number: display_number || '',
+        }
       })
       setPreview(parsed)
     }
@@ -118,8 +164,15 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
         await customerApi.create({
           name: customer.name.trim(),
           phone: customer.phone.trim(),
+          aadhar_card: customer.aadhar_card.trim(),
           address: customer.address.trim(),
+          state: customer.state.trim(),
+          country: customer.country.trim(),
           gstin: customer.gstin.trim(),
+          acres: customer.acres.trim(),
+          loyalty: customer.loyalty.trim(),
+          referral: customer.referral.trim(),
+          display_number: customer.display_number.trim(),
           tally_ledger_name: customer.name.trim(),
         })
         successCount++
@@ -149,7 +202,7 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
         <h2 className="mb-4 text-2xl font-bold text-black">Bulk Upload Customers</h2>
 
         <a
-          href="data:text/csv;charset=utf-8,name%2Cphone%2Caddress%2Cgstin%0AJohn%20Doe%2C9876543210%2C123%20Street%2C27AABCT1234H1Z0%0AJane%20Smith%2C9876543211%2C456%20Avenue%2C27AABCD5678H1Z0"
+          href="data:text/csv;charset=utf-8,name%2Cphone%2Caadhar_card%2Caddress%2Cstate%2Ccountry%2Cgstin%2Cacres%2Cloyalty%2Creferral%2Cdisplay_number%0AJohn%20Doe%2C9876543210%2C123456789012%2CBangalore%2CKarnataka%2CIndia%2C27AABCT1234H1Z0%2C5%2CGold%2CRamesh%2CC001%0AJane%20Smith%2C9876543211%2C123456789013%2CPune%2CMaharashtra%2CIndia%2C27AABCD5678H1Z0%2C3%2CSilver%2CSuresh%2CC002"
           download="customers_template.csv"
           className="mb-4 inline-flex items-center gap-2 rounded-lg bg-green-100 px-4 py-3 font-medium text-green-700 transition-colors hover:bg-green-200"
         >
@@ -182,8 +235,15 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
                   <tr className="bg-gray-50">
                     <th className="border border-gray-200 px-3 py-2 text-left">Name</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Phone</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Aadhar Card</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Address (City)</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">State</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Country</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">GSTIN</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Acres</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Loyalty</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Referral</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Display Number</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Action</th>
                   </tr>
                 </thead>
@@ -210,6 +270,13 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
                         <td className="border border-gray-200 px-2 py-1">
                           <input
                             className={inputClass}
+                            value={customer.aadhar_card}
+                            onChange={(e) => updateRow(idx, 'aadhar_card', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
                             value={customer.address}
                             onChange={(e) => updateRow(idx, 'address', e.target.value)}
                           />
@@ -217,8 +284,50 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
                         <td className="border border-gray-200 px-2 py-1">
                           <input
                             className={inputClass}
+                            value={customer.state}
+                            onChange={(e) => updateRow(idx, 'state', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={customer.country}
+                            onChange={(e) => updateRow(idx, 'country', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
                             value={customer.gstin}
                             onChange={(e) => updateRow(idx, 'gstin', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={customer.acres}
+                            onChange={(e) => updateRow(idx, 'acres', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={customer.loyalty}
+                            onChange={(e) => updateRow(idx, 'loyalty', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={customer.referral}
+                            onChange={(e) => updateRow(idx, 'referral', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={customer.display_number}
+                            onChange={(e) => updateRow(idx, 'display_number', e.target.value)}
                           />
                         </td>
                         <td className="border border-gray-200 px-2 py-1 text-center">

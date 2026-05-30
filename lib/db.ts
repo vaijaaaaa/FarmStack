@@ -210,6 +210,7 @@ function applySchema(db: any): void {
   ensureColumn(db, 'customers', 'loyalty', "TEXT DEFAULT ''")
   ensureColumn(db, 'customers', 'referral', "TEXT DEFAULT ''")
   ensureColumn(db, 'customers', 'display_number', "TEXT DEFAULT ''")
+  ensureColumn(db, 'customers', 'aadhar_card', "TEXT DEFAULT ''")
   for (const table of ['customers', 'suppliers', 'products', 'product_types']) {
     for (const [col, def] of masterTallyColumns) ensureColumn(db, table, col, def)
   }

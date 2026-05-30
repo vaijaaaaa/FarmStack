@@ -44,6 +44,28 @@ const GST_SUPPLY_OPTIONS = [
 // GST Rate "0" means Exempted — no tax split, so GST Supply Type is N/A.
 const isExempted = (gstRate: string) => gstRate === '0'
 
+// Map a product's category (the product master "product_type") to its Tally
+// purchase ledger — e.g. "Fertilizers" -> "Purchase of Fertilizers". This runs
+// only in the background; the category/ledger is never shown on the Purchase page.
+const CATEGORY_TO_PURCHASE_LEDGER: Record<string, string> = {
+  fertilizer: 'Purchase of Fertilizers',
+  fertilizers: 'Purchase of Fertilizers',
+  micronutrient: 'Purchase of Micronutrients',
+  micronutrients: 'Purchase of Micronutrients',
+  pesticide: 'Purchase of Pesticides',
+  pesticides: 'Purchase of Pesticides',
+  seed: 'Purchase of Seeds',
+  seeds: 'Purchase of Seeds',
+  grain: 'Purchase of Grains',
+  grains: 'Purchase of Grains',
+}
+const toPurchaseLedger = (category: string): string => {
+  const key = (category || '').trim().toLowerCase()
+  if (!key) return ''
+  if (key.startsWith('purchase')) return category.trim()
+  return CATEGORY_TO_PURCHASE_LEDGER[key] || `Purchase of ${category.trim()}`
+}
+
 interface PurchaseInvoiceModuleProps {
   language: Language
 }
@@ -60,7 +82,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     name: '',
     hsn_code: '',
     unit: '',
-    product_type: 'Purchase of Fertilizer',
+    product_type: 'Fertilizers',
     gst_rate: '',
     gst_supply_type: 'local',
     selling_price: '',
@@ -181,6 +203,41 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     setPurchaseItems(purchaseItems.filter((_, index) => index !== indexToRemove))
   }
 
+  // A row is "complete" when every required field is filled. Expiry is only
+  // required for seed products. Drives the Excel-like auto-row creation.
+  const isRowComplete = (it: PurchaseItem): boolean => {
+    if (!it.selectedProduct) return false
+    if (!(Number(it.quantity) > 0)) return false
+    if (!it.batch.trim()) return false
+    if (it.buyingPrice.trim() === '') return false
+    if (it.sellingPrice.trim() === '') return false
+    if (it.tallyPrice.trim() === '') return false
+    const product = mockProducts.find((p) => p.id === it.selectedProduct)
+    if (product?.is_seed && !it.expiryDate.trim()) return false
+    return true
+  }
+
+  // A row is "empty" when nothing has been entered. Trailing empty rows are
+  // auto-created placeholders and are skipped when saving.
+  const isRowEmpty = (it: PurchaseItem): boolean =>
+    !it.selectedProduct &&
+    !it.quantity.trim() &&
+    !it.batch.trim() &&
+    !it.buyingPrice.trim() &&
+    !it.sellingPrice.trim() &&
+    !it.tallyPrice.trim() &&
+    !it.expiryDate.trim()
+
+  // Once the last row is fully filled, append a fresh empty row automatically
+  // (no "Add" button needed — behaves like Excel/Google Sheets).
+  useEffect(() => {
+    const last = purchaseItems[purchaseItems.length - 1]
+    if (last && isRowComplete(last)) {
+      setPurchaseItems((prev) => [...prev, { ...emptyPurchaseItem }])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [purchaseItems])
+
   // Auto-fill unit, product type, GST rate and price defaults from the selected
   // product master. The product's price becomes the Buying Price here; Tally
   // Price comes from the master too. Selling Price, Batch and Expiry Date stay
@@ -225,7 +282,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       name: '',
       hsn_code: '',
       unit: '',
-      product_type: 'Purchase of Fertilizer',
+      product_type: 'Fertilizers',
       gst_rate: '',
       gst_supply_type: 'local',
       selling_price: '',
@@ -619,14 +676,16 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       toast.error('This supplier invoice number already exists. Enter a unique invoice number.')
       return
     }
-    if (purchaseItems.length === 0) {
+    // Trailing empty rows (auto-created placeholders) are ignored on save.
+    const activeItems = purchaseItems.filter((it) => !isRowEmpty(it))
+    if (activeItems.length === 0) {
       toast.error('Please add at least one product')
       return
     }
 
     // Every item must be valid before saving.
-    for (let i = 0; i < purchaseItems.length; i++) {
-      const item = purchaseItems[i]
+    for (let i = 0; i < activeItems.length; i++) {
+      const item = activeItems[i]
       const label = `Item ${i + 1}`
       if (!item.selectedProduct) {
         toast.error(`${label}: Please select a product.`)
@@ -641,7 +700,19 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         toast.error(`${label}: Batch is required.`)
         return
       }
-      if (batchDuplicate(i)) {
+      const batchKey = item.batch.trim().toLowerCase()
+      const dupInForm = activeItems.some(
+        (other, j) =>
+          j !== i &&
+          other.selectedProduct === item.selectedProduct &&
+          other.batch.trim().toLowerCase() === batchKey,
+      )
+      const dupInHistory = invoices.some(
+        (r) =>
+          String(r.product_id) === item.selectedProduct &&
+          String(r.batch || '').trim().toLowerCase() === batchKey,
+      )
+      if (batchKey && (dupInForm || dupInHistory)) {
         toast.error(`${label}: Batch "${item.batch.trim()}" already exists for this product.`)
         return
       }
@@ -657,7 +728,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       }
       const tally = Number(String(item.tallyPrice ?? '').trim())
       if (item.tallyPrice.trim() === '' || !Number.isFinite(tally) || tally < 0) {
-        toast.error(`${label}: Tally Price is required and must be 0 or more.`)
+        toast.error(`${label}: Tally Selling Price is required and must be 0 or more.`)
         return
       }
       // Seed products must carry an expiry date — it flows into the stock batch.
@@ -669,7 +740,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     }
     const supplier = mockSuppliers.find((s) => s.id === selectedSupplier)
 
-    const items = purchaseItems.map((item) => {
+    const items = activeItems.map((item) => {
       const product = mockProducts.find((p) => p.id === item.selectedProduct)
       const qty = Number(item.quantity || '0')
       const buying = Number(item.buyingPrice || '0')
@@ -686,7 +757,9 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         selling_price: Number(item.sellingPrice || '0'),
         tally_price: Number(item.tallyPrice || '0'),
         expiry_date: item.expiryDate || '',
-        type: item.productType,
+        // Category from the product master → Tally purchase ledger, e.g.
+        // "Fertilizers" → "Purchase of Fertilizers". Mapped automatically.
+        type: toPurchaseLedger(item.productType),
         tax: taxRate,
         total_price: lineTotal,
         batch: item.batch.trim(),
@@ -725,6 +798,12 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     }
   }
 
+  // Header Total Amount = sum of (quantity × buying price) across all rows.
+  const purchaseTotal = purchaseItems.reduce(
+    (sum, it) => sum + Number(it.quantity || '0') * Number(it.buyingPrice || '0'),
+    0,
+  )
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -740,110 +819,124 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       {showNewInvoice && (
         <div data-kbd-scope className="rounded-lg bg-white p-2 shadow-sm border border-gray-200">
           <div className="p-6">
-            <div className="flex justify-between items-center mb-8">
-              <h3 className="text-xl font-bold text-black">New Purchase</h3>
-              <div className="flex flex-col items-end gap-3">
-                <Button onClick={handleAddRow} className="bg-blue-500 hover:bg-blue-600 text-white text-sm h-8 rounded-md px-4">
-                  Add new Purchase
-                </Button>
-                <div className="flex flex-col items-end gap-1">
+            <h3 className="text-xl font-bold text-black mb-6">New Purchase</h3>
+            
+            {/* Header fields: Supplier Name | Invoice No | Date | Total — one row */}
+            <div className="mb-8">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">
+                {/* Supplier Name */}
+                <div className="relative flex flex-col gap-1">
+                  <label className="text-gray-700 font-medium text-xs">Supplier Name</label>
+                  <input
+                    type="text"
+                    value={supplierSearch}
+                    placeholder="Supplier Name"
+                    onChange={(e) => {
+                      setSupplierSearch(e.target.value)
+                      setSelectedSupplier('')
+                      setShowSupplierDropdown(true)
+                    }}
+                    onFocus={() => setShowSupplierDropdown(true)}
+                    className="w-full rounded-md border-2 border-blue-500 px-4 py-2 text-left text-gray-700 bg-blue-50 focus:outline-none font-medium placeholder:font-normal placeholder:text-gray-400"
+                  />
+                  {showSupplierDropdown && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setShowSupplierDropdown(false)}
+                      />
+                      <div ref={supplierDropdownRef} className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-300 rounded-md z-20 overflow-hidden">
+                        <div className="max-h-60 overflow-y-auto">
+                          {mockSuppliers
+                            .filter((s) =>
+                              s.name.toLowerCase().includes(supplierSearch.toLowerCase()),
+                            )
+                            .map((supplier) => (
+                              <button
+                                key={supplier.id}
+                                onClick={() => handleSupplierSelect(supplier.id)}
+                                className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0"
+                              >
+                                {supplier.name}
+                              </button>
+                            ))}
+                          {mockSuppliers.filter((s) =>
+                            s.name.toLowerCase().includes(supplierSearch.toLowerCase()),
+                          ).length === 0 && (
+                            <p className="px-4 py-3 text-sm text-gray-500">No suppliers found</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleSupplierSelect('add')}
+                          className="w-full text-left px-4 py-2 hover:bg-green-50 font-semibold text-green-600 border-t border-gray-300"
+                        >
+                          + Add Supplier
+                        </button>
+                        <button
+                          onClick={() => handleSupplierSelect('search')}
+                          className="w-full text-left px-4 py-2 hover:bg-blue-50 font-semibold text-blue-600 border-t border-gray-300"
+                        >
+                          🔍 Search Supplier
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Supplier Invoice Number */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-gray-700 font-medium text-xs">Supplier Invoice Number</label>
+                  <input
+                    type="text"
+                    placeholder="Supplier Invoice Number"
+                    value={supplierInvoiceNumber}
+                    onChange={(e) => setSupplierInvoiceNumber(e.target.value)}
+                    className={`w-full rounded-md border px-4 py-2 text-center text-gray-700 bg-gray-50 focus:outline-none ${
+                      invoiceNumberTaken ? 'border-red-500' : 'border-gray-400'
+                    }`}
+                  />
+                  {invoiceNumberTaken && (
+                    <p className="text-xs font-medium text-red-600">
+                      This invoice number already exists.
+                    </p>
+                  )}
+                </div>
+
+                {/* Purchase Date */}
+                <div className="flex flex-col gap-1">
                   <label className="text-gray-700 font-medium text-xs">Purchase Date</label>
-                  <input 
-                    type="date" 
+                  <input
+                    type="date"
                     value={purchaseDate}
                     onChange={(e) => setPurchaseDate(e.target.value)}
-                    className="w-40 rounded-md border border-gray-400 px-3 py-1 text-center text-gray-700 bg-gray-50 focus:outline-none text-sm" 
+                    className="w-full rounded-md border border-gray-400 px-3 py-2 text-center text-gray-700 bg-gray-50 focus:outline-none text-sm"
                   />
                 </div>
-              </div>
-            </div>
-            
-            <div className="flex justify-center gap-12 mb-8">
-              {/* Supplier Dropdown */}
-              <div className="relative">
-                <input
-                  type="text"
-                  value={supplierSearch}
-                  placeholder="Supplier Name"
-                  onChange={(e) => {
-                    setSupplierSearch(e.target.value)
-                    setSelectedSupplier('')
-                    setShowSupplierDropdown(true)
-                  }}
-                  onFocus={() => setShowSupplierDropdown(true)}
-                  className="w-64 rounded-md border-2 border-blue-500 px-4 py-2 text-left text-gray-700 bg-blue-50 focus:outline-none font-medium placeholder:font-normal placeholder:text-gray-400"
-                />
-                {showSupplierDropdown && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-10"
-                      onClick={() => setShowSupplierDropdown(false)}
-                    />
-                    <div ref={supplierDropdownRef} className="absolute top-full left-0 mt-2 w-64 bg-white border border-gray-300 rounded-md z-20 overflow-hidden">
-                      <div className="max-h-60 overflow-y-auto">
-                        {mockSuppliers
-                          .filter((s) =>
-                            s.name.toLowerCase().includes(supplierSearch.toLowerCase()),
-                          )
-                          .map((supplier) => (
-                            <button
-                              key={supplier.id}
-                              onClick={() => handleSupplierSelect(supplier.id)}
-                              className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0"
-                            >
-                              {supplier.name}
-                            </button>
-                          ))}
-                        {mockSuppliers.filter((s) =>
-                          s.name.toLowerCase().includes(supplierSearch.toLowerCase()),
-                        ).length === 0 && (
-                          <p className="px-4 py-3 text-sm text-gray-500">No suppliers found</p>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => handleSupplierSelect('add')}
-                        className="w-full text-left px-4 py-2 hover:bg-green-50 font-semibold text-green-600 border-t border-gray-300"
-                      >
-                        + Add Supplier
-                      </button>
-                      <button
-                        onClick={() => handleSupplierSelect('search')}
-                        className="w-full text-left px-4 py-2 hover:bg-blue-50 font-semibold text-blue-600 border-t border-gray-300"
-                      >
-                        🔍 Search Supplier
-                      </button>
-                    </div>
-                  </>
-                )}
+
+                {/* Total Amount — auto-calculated, read-only */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-gray-700 font-medium text-xs">Total Amount</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={`₹${purchaseTotal.toFixed(2)}`}
+                    className="w-full rounded-md border border-gray-400 px-3 py-2 text-center text-gray-800 bg-gray-100 font-semibold focus:outline-none"
+                  />
+                </div>
               </div>
 
-              <div className="flex flex-col gap-3">
+              {/* Sync with Tally — stays below the fields */}
+              <div className="flex items-center gap-2">
                 <input
-                  type="text"
-                  placeholder="Supplier Invoice Number"
-                  value={supplierInvoiceNumber}
-                  onChange={(e) => setSupplierInvoiceNumber(e.target.value)}
-                  className={`w-72 rounded-md border px-4 py-2 text-center text-gray-700 bg-gray-50 focus:outline-none ${
-                    invoiceNumberTaken ? 'border-red-500' : 'border-gray-400'
-                  }`}
+                  type="checkbox"
+                  id="tally-status"
+                  checked={tallyStatus}
+                  onChange={(e) => setTallyStatus(e.target.checked)}
+                  className="w-4 h-4 accent-green-500 cursor-pointer"
                 />
-                {invoiceNumberTaken && (
-                  <p className="-mt-2 text-xs font-medium text-red-600">
-                    This invoice number already exists.
-                  </p>
-                )}
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    id="tally-status"
-                    checked={tallyStatus}
-                    onChange={(e) => setTallyStatus(e.target.checked)}
-                    className="w-4 h-4 accent-green-500 cursor-pointer"
-                  />
-                  <label htmlFor="tally-status" className="text-sm text-gray-700 font-medium cursor-pointer">
-                    Sync with Tally
-                  </label>
-                </div>
+                <label htmlFor="tally-status" className="text-sm text-gray-700 font-medium cursor-pointer">
+                  Sync with Tally
+                </label>
               </div>
             </div>
 
@@ -852,31 +945,22 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 <thead className="bg-[#e0e0e0] text-gray-800 border-b border-gray-300">
                   <tr>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Name</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Batch <span className="text-red-500">*</span></th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Buying Price <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Selling Price <span className="text-red-500">*</span></th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tally Price <span className="text-red-500">*</span></th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tally Selling Price <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">
                       Expiry Date
                       {purchaseItems.some(
                         (it) => mockProducts.find((p) => p.id === it.selectedProduct)?.is_seed,
                       ) && <span className="text-red-500"> *</span>}
                     </th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Type</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Tax%</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Total</th>
                     <th className="py-3 px-2 font-semibold whitespace-nowrap"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {purchaseItems.map((item, index) => {
-                    const itemTax = Number(item.gstRate || '0')
-                    // Total includes GST: taxable (qty * buying price) + tax.
-                    const itemTaxable =
-                      Number(item.quantity || '0') * Number(item.buyingPrice || '0')
-                    const itemTotal = itemTaxable + (itemTaxable * itemTax) / 100
-
                     return (
                       <tr key={index} className="border-b border-gray-300 bg-[#ebebeb]">
                         <td className="p-2 border-r border-gray-300 align-middle">
@@ -894,22 +978,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                           </select>
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <div className="flex items-center justify-center gap-1">
-                            <input
-                              type="number"
-                              value={item.quantity}
-                              onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
-                              placeholder="0"
-                              className="w-16 text-center border border-gray-400 rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1"
-                            />
-                            {item.unit && (
-                              <span className="text-xs font-medium text-gray-600 whitespace-nowrap">
-                                {item.unit}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
                           <input
                             type="text"
                             value={item.batch}
@@ -924,6 +992,22 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                               Batch already exists
                             </div>
                           )}
+                        </td>
+                        <td className="p-2 border-r border-gray-300 align-middle">
+                          <div className="flex items-center justify-center gap-1">
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value)}
+                              placeholder="0"
+                              className="w-16 text-center border border-gray-400 rounded bg-white text-gray-800 placeholder-gray-500 focus:outline-none p-1"
+                            />
+                            {item.unit && (
+                              <span className="text-xs font-medium text-gray-600 whitespace-nowrap">
+                                {item.unit}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
                           <input
@@ -959,31 +1043,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                             onChange={(e) => handleUpdateItem(index, 'expiryDate', e.target.value)}
                             className="w-28 bg-white border border-gray-400 rounded text-center focus:outline-none p-1 text-gray-800 text-xs"
                           />
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle text-xs">
-                          <select
-                            value={item.productType}
-                            onChange={(e) => handleTypeSelectChange(index, e.target.value)}
-                            className="w-32 bg-white border border-gray-400 rounded text-xs focus:outline-none text-gray-800 p-1"
-                          >
-                            <option value="">Select type</option>
-                            {item.productType &&
-                              !availableProductTypes.some((t) => t.name === item.productType) && (
-                                <option value={item.productType}>{item.productType}</option>
-                              )}
-                            {availableProductTypes.map((t) => (
-                              <option key={t.id} value={t.name}>{t.name}</option>
-                            ))}
-                            <option value="add-type">+ Add Type</option>
-                          </select>
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <span className="font-medium text-gray-800">
-                            {item.selectedProduct ? `${itemTax}%` : '—'}
-                          </span>
-                        </td>
-                        <td className="p-2 border-r border-gray-300 align-middle">
-                          <span className="text-black font-medium">{itemTotal > 0 ? itemTotal.toFixed(2) : '0.00'}</span>
                         </td>
                         <td className="p-2 align-middle">
                           {purchaseItems.length > 1 && (

@@ -18,8 +18,11 @@ interface BulkUploadModalProps {
 interface ParsedSupplier {
   name: string
   phone: string
-  gstin: string
+  address: string
   state: string
+  country: string
+  gstin: string
+  place_of_supply: string
 }
 
 export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }: BulkUploadModalProps) {
@@ -71,15 +74,37 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
     parseCSV(selectedFile)
   }
 
+  const EXPECTED_HEADERS = ['name', 'phone', 'address', 'state', 'country', 'gstin', 'place_of_supply']
+
   const parseCSV = (file: File) => {
     const reader = new FileReader()
     reader.onload = (event) => {
       const text = event.target?.result as string
       const lines = text.split('\n').filter((line) => line.trim())
+      const headers = (lines[0] || '').split(',').map((h) => h.trim().toLowerCase())
+      const headersMatch =
+        headers.length === EXPECTED_HEADERS.length &&
+        EXPECTED_HEADERS.every((h, i) => headers[i] === h)
+      if (!headersMatch) {
+        toast.error(
+          `Invalid columns. This must be a supplier CSV with columns: ${EXPECTED_HEADERS.join(', ')}`,
+        )
+        setFile(null)
+        setPreview([])
+        return
+      }
       const dataLines = lines.slice(1)
       const parsed: ParsedSupplier[] = dataLines.map((line) => {
-        const [name, phone, gstin, state] = line.split(',').map((s) => s.trim())
-        return { name: name || '', phone: phone || '', gstin: gstin || '', state: state || '' }
+        const [name, phone, address, state, country, gstin, place_of_supply] = line.split(',').map((s) => s.trim())
+        return {
+          name: name || '',
+          phone: phone || '',
+          address: address || '',
+          state: state || '',
+          country: country || '',
+          gstin: gstin || '',
+          place_of_supply: place_of_supply || '',
+        }
       })
       setPreview(parsed)
     }
@@ -119,8 +144,11 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
         await supplierApi.create({
           name: supplier.name.trim(),
           phone: supplier.phone.trim(),
-          gstin: supplier.gstin.trim(),
+          address: supplier.address.trim(),
           state: supplier.state.trim(),
+          country: supplier.country.trim(),
+          gstin: supplier.gstin.trim(),
+          place_of_supply: supplier.place_of_supply.trim(),
           tally_ledger_name: supplier.name.trim(),
         })
         successCount++
@@ -150,7 +178,7 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
         <h2 className="mb-4 text-2xl font-bold text-black">Bulk Upload Suppliers</h2>
 
         <a
-          href="data:text/csv;charset=utf-8,name%2Cphone%2Cgstin%2Cstate%0AABC%20Supplies%2C9876543210%2C27AABCT1234H1Z0%2CKarnataka%0AXYZ%20Traders%2C9876543211%2C27AABCD5678H1Z0%2CMaharashtra%0AFarm%20Goods%2C9876543212%2C27AABCE9012H1Z0%2CPunjab"
+          href="data:text/csv;charset=utf-8,name%2Cphone%2Caddress%2Cstate%2Ccountry%2Cgstin%2Cplace_of_supply%0AABC%20Supplies%2C9876543210%2CMumbai%2CMaharashtra%2CIndia%2C27AABCT1234H1Z0%2CMaharashtra%0AXYZ%20Traders%2C9876543211%2CPune%2CMaharashtra%2CIndia%2C27AABCD5678H1Z0%2CMaharashtra"
           download="suppliers_template.csv"
           className="mb-4 inline-flex items-center gap-2 rounded-lg bg-green-100 px-4 py-3 font-medium text-green-700 transition-colors hover:bg-green-200"
         >
@@ -183,8 +211,11 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
                   <tr className="bg-gray-50">
                     <th className="border border-gray-200 px-3 py-2 text-left">Name</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Phone</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">GSTIN</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Address</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">State</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Country</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">GSTIN</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Place of Supply</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Action</th>
                   </tr>
                 </thead>
@@ -211,8 +242,8 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
                         <td className="border border-gray-200 px-2 py-1">
                           <input
                             className={inputClass}
-                            value={supplier.gstin}
-                            onChange={(e) => updateRow(idx, 'gstin', e.target.value)}
+                            value={supplier.address}
+                            onChange={(e) => updateRow(idx, 'address', e.target.value)}
                           />
                         </td>
                         <td className="border border-gray-200 px-2 py-1">
@@ -220,6 +251,27 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
                             className={inputClass}
                             value={supplier.state}
                             onChange={(e) => updateRow(idx, 'state', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={supplier.country}
+                            onChange={(e) => updateRow(idx, 'country', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={supplier.gstin}
+                            onChange={(e) => updateRow(idx, 'gstin', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={supplier.place_of_supply}
+                            onChange={(e) => updateRow(idx, 'place_of_supply', e.target.value)}
                           />
                         </td>
                         <td className="border border-gray-200 px-2 py-1 text-center">

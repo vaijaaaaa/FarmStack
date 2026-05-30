@@ -5,22 +5,41 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const defaultTypes = [
-  { name: 'Sales of Grain', description: 'Default sales type', tax: 5 },
-  { name: 'Sales of Fertilizer', description: 'Default sales type', tax: 5 },
-  { name: 'Sales of Micronutrients', description: 'Default sales type', tax: 12 },
-  { name: 'Sales of Pesticide', description: 'Default sales type', tax: 18 },
-  { name: 'Sales of Seeds', description: 'Default sales type', tax: 0 },
-  { name: 'Purchase of Fertilizer', description: 'Default purchase type', tax: 5 },
-  { name: 'Purchase of Micronutrients', description: 'Default purchase type', tax: 12 },
-  { name: 'Purchase of Pesticide', description: 'Default purchase type', tax: 18 },
-  { name: 'Purchase of Seeds', description: 'Default purchase type', tax: 0 },
+  { name: 'Fertilizers', description: 'Default product type', tax: 5 },
+  { name: 'Micronutrients', description: 'Default product type', tax: 12 },
+  { name: 'Pesticide', description: 'Default product type', tax: 18 },
+  { name: 'Seeds', description: 'Default product type', tax: 0 },
+]
+
+// Legacy default type names that should no longer appear in the list.
+const legacyDefaultNames = [
+  'Sales of Grain',
+  'Sales of Fertilizer',
+  'Sales of Micronutrients',
+  'Sales of Pesticide',
+  'Sales of Seeds',
+  'Purchase of Fertilizer',
+  'Purchase of Micronutrients',
+  'Purchase of Pesticide',
+  'Purchase of Seeds',
+  'Purchase of Ammonium Sulphate',
+  'Pucharse of Ammonium Sulphate',
 ]
 
 async function seedDefaultsIfNeeded() {
-  const countRows = await query<{ c: number }>('SELECT COUNT(*) AS c FROM product_types')
-  if ((countRows[0]?.c ?? 0) > 0) return
+  // Drop the old default types from already-seeded databases.
+  for (const name of legacyDefaultNames) {
+    await execute('DELETE FROM product_types WHERE name = ?', [name])
+  }
 
+  // Ensure each of the current default types exists (without removing any
+  // custom types that were added later).
   for (const type of defaultTypes) {
+    const existing = await query<{ id: string }>(
+      'SELECT id FROM product_types WHERE name = ?',
+      [type.name],
+    )
+    if (existing.length > 0) continue
     await execute(
       `INSERT INTO product_types (id, name, description, tax, created_at)
        VALUES (?, ?, ?, ?, ?)`,
