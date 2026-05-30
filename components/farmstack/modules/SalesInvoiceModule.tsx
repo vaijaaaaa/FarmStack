@@ -91,26 +91,6 @@ const emptyNewCustomer: NewCustomerForm = {
   display_number: '',
 }
 
-// A stock batch available for a product (derived from purchase history).
-interface StockBatch {
-  batchName: string
-  available: number
-  sellingPrice: number
-  tallyPrice: number
-  unit: string
-  expiry: string
-}
-
-// One batch allocation produced from a line.
-interface AllocChunk {
-  batchName: string
-  qty: number
-  sellingPrice: number
-  tallyPrice: number
-  unit: string
-  expiry: string
-}
-
 export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps) {
   const t = (key: string) => getTranslation(language, key)
   const { customers: mockCustomers, createCustomer } = useCustomers()
@@ -151,73 +131,35 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const [vehicleNumber, setVehicleNumber] = useState('')
   const [vehicleType, setVehicleType] = useState('')
 
-  // ----- Stock / batch derivation (FEFO) ---------------------------------
-  // Batches available for a product, oldest-expiry first (empty expiry last).
-  const getBatchesForProduct = (productId: string): StockBatch[] => {
-    if (!productId) return []
-    const byBatch = new Map<string, StockBatch>()
+  // ----- Stock / pricing (batch-free) ------------------------------------
+  // The most recent purchase of a product — drives the latest selling price,
+  // tally price and expiry. The latest purchase always overrides older ones.
+  const latestPurchaseForProduct = (productId: string) => {
+    let latest: (typeof purchaseInvoices)[number] | null = null
     for (const p of purchaseInvoices) {
       if (String(p.product_id || '') !== productId) continue
-      const name = String(p.batch || '')
-      const cur =
-        byBatch.get(name) ||
-        {
-          batchName: name,
-          available: 0,
-          sellingPrice: Number(p.selling_price || 0),
-          tallyPrice: Number(p.tally_price || 0),
-          unit: String(p.unit || ''),
-          expiry: String(p.expiry_date || ''),
-        }
-      cur.available += Number(p.quantity || 0)
-      // Keep the most informative price/expiry seen for the batch.
-      if (p.selling_price) cur.sellingPrice = Number(p.selling_price)
-      if (p.tally_price) cur.tallyPrice = Number(p.tally_price)
-      if (p.unit) cur.unit = String(p.unit)
-      if (p.expiry_date) cur.expiry = String(p.expiry_date)
-      byBatch.set(name, cur)
-    }
-    // Subtract quantities already sold from each batch.
-    for (const inv of invoices) {
-      for (const it of inv.items || []) {
-        if (String(it.product_id || '') !== productId) continue
-        const name = String(it.batch || '')
-        const b = byBatch.get(name)
-        if (b) b.available -= Number(it.quantity || 0)
+      if (!latest || String(p.created_at || '') >= String(latest.created_at || '')) {
+        latest = p
       }
     }
-    return [...byBatch.values()]
-      .filter((b) => b.available > 0.0001)
-      .sort((a, b) => {
-        if (!a.expiry && !b.expiry) return 0
-        if (!a.expiry) return 1 // empty expiry last
-        if (!b.expiry) return -1
-        return a.expiry.localeCompare(b.expiry)
-      })
+    return latest
   }
 
-  const availableStock = (productId: string) =>
-    getBatchesForProduct(productId).reduce((s, b) => s + b.available, 0)
-
-  // Allocate a requested quantity across FEFO batches.
-  const allocate = (productId: string, qty: number): { chunks: AllocChunk[]; shortfall: number } => {
-    const batches = getBatchesForProduct(productId)
-    const chunks: AllocChunk[] = []
-    let remaining = qty
-    for (const b of batches) {
-      if (remaining <= 0.0001) break
-      const take = Math.min(remaining, b.available)
-      chunks.push({
-        batchName: b.batchName,
-        qty: take,
-        sellingPrice: b.sellingPrice,
-        tallyPrice: b.tallyPrice,
-        unit: b.unit,
-        expiry: b.expiry,
-      })
-      remaining -= take
+  // Available stock = total quantity purchased − total quantity already sold,
+  // ignoring batches entirely.
+  const availableStock = (productId: string) => {
+    if (!productId) return 0
+    let purchased = 0
+    for (const p of purchaseInvoices) {
+      if (String(p.product_id || '') === productId) purchased += Number(p.quantity || 0)
     }
-    return { chunks, shortfall: Math.max(0, remaining) }
+    let sold = 0
+    for (const inv of invoices) {
+      for (const it of inv.items || []) {
+        if (String(it.product_id || '') === productId) sold += Number(it.quantity || 0)
+      }
+    }
+    return purchased - sold
   }
 
   const productGst = (productId: string) =>
@@ -398,14 +340,15 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       toast.error('No stock available for this product. Please add purchase stock first.')
       return
     }
-    // Auto-fill selling price & expiry from the earliest-expiry batch (FEFO).
-    const batch = getBatchesForProduct(productId)[0]
+    // Auto-fill selling price & expiry from the LATEST purchase of this product
+    // — the most recent purchase price always overrides older ones.
+    const latest = latestPurchaseForProduct(productId)
     const updated = [...saleLines]
     updated[index] = {
       ...updated[index],
       selectedProduct: productId,
-      sellingPrice: String(batch?.sellingPrice ?? ''),
-      expiryDate: batch?.expiry ?? '',
+      sellingPrice: latest?.selling_price != null ? String(latest.selling_price) : '',
+      expiryDate: latest?.expiry_date ? String(latest.expiry_date) : '',
     }
     setSaleLines(updated)
   }
@@ -495,30 +438,29 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         toast.error(`${label}: Expiry Date is required for seed products.`)
         return null
       }
-      const { chunks, shortfall } = allocate(line.selectedProduct, qty)
-      if (shortfall > 0.0001) {
-        const avail = availableStock(line.selectedProduct)
+      // Stock check (batch-free): can't sell more than what's available.
+      const avail = availableStock(line.selectedProduct)
+      if (qty > avail + 0.0001) {
         toast.error(`Only ${avail} ${unit} available for ${name}.`)
         return null
       }
       const gst = productGst(line.selectedProduct)
       const price = Number(line.sellingPrice || '0')
-      // Each FEFO chunk is sold at the row's entered selling price.
-      for (const c of chunks) {
-        items.push({
-          product_id: line.selectedProduct,
-          batch: c.batchName,
-          quantity: c.qty,
-          rate: price,
-          tally_price: c.tallyPrice,
-          gst,
-          // Category from the product master → Tally sales ledger, e.g.
-          // "Fertilizers" → "Sales of Fertilizers". Mapped automatically.
-          type: toSalesLedger(product?.product_type || ''),
-          unit: c.unit || unit,
-          expiry_date: c.expiry || line.expiryDate || '',
-        })
-      }
+      const latest = latestPurchaseForProduct(line.selectedProduct)
+      // One product = one item line. No batch splitting; the latest purchase's
+      // tally price is carried, and the row's selling price is used as the rate.
+      items.push({
+        product_id: line.selectedProduct,
+        quantity: qty,
+        rate: price,
+        tally_price: latest?.tally_price != null ? Number(latest.tally_price) : 0,
+        gst,
+        // Category from the product master → Tally sales ledger, e.g.
+        // "Fertilizers" → "Sales of Fertilizers". Mapped automatically.
+        type: toSalesLedger(product?.product_type || ''),
+        unit,
+        expiry_date: line.expiryDate || '',
+      })
       // Header Total = qty × entered selling price (no GST), matches header.
       total += qty * price
     }
