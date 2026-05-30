@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { Fragment, useState, useEffect, useRef } from 'react'
 import type { Language, Product, Supplier } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { useSuppliers, useProducts, useProductTypes, usePurchaseInvoices } from '@/hooks/useDatabase'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import DataTable from '../components/DataTable'
+import { ChevronDown, ChevronUp, Printer } from 'lucide-react'
 import TallyStatusCell from '../components/TallyStatusCell'
 
 // Today's date as YYYY-MM-DD (local time) for date inputs.
@@ -120,7 +120,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const [supplierSearchResults, setSupplierSearchResults] = useState<Supplier[]>([])
   const [supplierSearchPerformed, setSupplierSearchPerformed] = useState(false)
   const supplierDropdownRef = useRef<HTMLDivElement>(null)
-  const [detailPurchaseId, setDetailPurchaseId] = useState<string | null>(null)
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null)
   const [showAddTypeModal, setShowAddTypeModal] = useState(false)
   const [currentTypeIndex, setCurrentTypeIndex] = useState<number | null>(null)
   const [newTypeName, setNewTypeName] = useState('')
@@ -569,69 +569,65 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     event.target.value = ''
   }
 
-  const columns = [
-    { key: 'supplier_name', label: 'Supplier' },
-    { key: 'supplier_invoice_number', label: 'Invoice #' },
-    { key: 'product_name', label: 'Product' },
-    { key: 'quantity', label: 'Qty' },
-    { key: 'batch', label: 'Batch' },
-    { key: 'buying_price', label: 'Buying' },
-    { key: 'selling_price', label: 'Selling' },
-    { key: 'tally_price', label: 'Tally' },
-    { key: 'expiry_date', label: 'Expiry' },
-    { key: 'type', label: 'Type' },
-    { key: 'tax', label: 'Tax%' },
-    { key: 'total_price', label: 'Total' },
-    { key: 'tally', label: 'Status' },
-    { key: 'actions', label: 'Details' },
-  ]
+  // Purchase history is invoice-level: group the flattened item rows by
+  // invoice id so each invoice appears once. items[] holds its product lines.
+  type PRow = (typeof invoices)[number]
+  const groupedInvoices = (() => {
+    const map = new Map<string, { header: PRow; items: PRow[]; total: number }>()
+    for (const row of invoices) {
+      const key = String(row.id)
+      if (!map.has(key)) map.set(key, { header: row, items: [], total: 0 })
+      const g = map.get(key)!
+      g.items.push(row)
+      g.total += Number(row.total_price || 0)
+    }
+    return [...map.values()]
+  })()
 
-  const tableData = invoices.map((invoice) => ({
-    supplier_name: invoice.supplier_name,
-    supplier_invoice_number: invoice.supplier_invoice_number,
-    product_name: invoice.product_name,
-    quantity: invoice.unit ? `${invoice.quantity} ${invoice.unit}` : invoice.quantity,
-    batch: invoice.batch || '—',
-    buying_price: `₹${invoice.buying_price}`,
-    selling_price: `Rs.${invoice.selling_price}`,
-    tally_price: `Rs.${invoice.tally_price}`,
-    expiry_date: invoice.expiry_date,
-    type: invoice.type,
-    tax: `${invoice.tax}%`,
-    total_price: `₹${invoice.total_price.toFixed(2)}`,
-    // Only purchases created WITH "Sync with Tally" on get sync/retry actions.
-    // A purchase saved with Tally sync off was intentionally kept out of Tally.
-    tally: invoice.tally_sync_enabled ? (
-      <TallyStatusCell
-        type="purchase"
-        invoiceId={invoice.id}
-        status={invoice.tally_sync_status || 'not_synced'}
-        response={invoice.tally_response}
-        onSynced={refresh}
-      />
-    ) : (
-      <span
-        className="text-xs text-gray-400"
-        title="This purchase was created with Tally sync off — not sent to Tally"
-      >
-        Not synced
-      </span>
-    ),
-    actions: (
-      <button
-        onClick={() => setDetailPurchaseId(invoice.id)}
-        data-kbd-row-action
-        className="rounded bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
-      >
-        View Details
-      </button>
-    ),
-  }))
-
-  // All flattened rows that belong to the purchase invoice being viewed.
-  const detailRows = detailPurchaseId
-    ? invoices.filter((r) => r.id === detailPurchaseId)
-    : []
+  const printInvoice = (group: { header: PRow; items: PRow[]; total: number }) => {
+    const w = window.open('', '_blank', 'width=820,height=920')
+    if (!w) { toast.error('Please allow pop-ups to print the invoice'); return }
+    const h = group.header
+    const rows = group.items.map((it) => `
+      <tr>
+        <td>${it.product_name ?? ''}</td>
+        <td style="text-align:center">${it.batch || '—'}</td>
+        <td style="text-align:center">${it.quantity}${it.unit ? ' ' + it.unit : ''}</td>
+        <td style="text-align:right">₹${Number(it.buying_price || 0).toFixed(2)}</td>
+        <td style="text-align:right">₹${Number(it.selling_price || 0).toFixed(2)}</td>
+        <td style="text-align:right">₹${Number(it.tally_price || 0).toFixed(2)}</td>
+        <td style="text-align:center">${it.expiry_date || '—'}</td>
+        <td style="text-align:right">₹${Number(it.total_price || 0).toFixed(2)}</td>
+      </tr>`).join('')
+    w.document.write(`<!doctype html><html><head><title>Invoice ${h.supplier_invoice_number ?? ''}</title>
+      <style>
+        body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:28px}
+        h1{font-size:20px;margin:0 0 4px} .muted{color:#555;font-size:13px}
+        .meta{margin:16px 0;font-size:13px;line-height:1.6}
+        table{width:100%;border-collapse:collapse;margin-top:12px;font-size:12px}
+        th,td{border:1px solid #ccc;padding:6px 8px}
+        th{background:#eee;text-align:left}
+        tfoot td{font-weight:bold}
+      </style></head><body>
+      <h1>Purchase Invoice</h1>
+      <div class="muted">FarmStack</div>
+      <div class="meta">
+        <div><strong>Supplier:</strong> ${h.supplier_name ?? ''}</div>
+        <div><strong>Invoice #:</strong> ${h.supplier_invoice_number ?? ''}</div>
+        <div><strong>Date:</strong> ${h.purchase_date ?? ''}</div>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Product</th><th>Batch</th><th>Qty</th><th>Buying Price</th>
+          <th>Selling Price</th><th>Tally Selling Price</th><th>Expiry</th><th>Total</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td colspan="7" style="text-align:right">Grand Total</td>
+        <td style="text-align:right">₹${group.total.toFixed(2)}</td></tr></tfoot>
+      </table>
+      </body></html>`)
+    w.document.close(); w.focus(); w.print()
+  }
 
   // ----- Uniqueness checks ------------------------------------------------
   // A supplier invoice number must not already exist in the purchase history.
@@ -1822,112 +1818,135 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
           </div>
         </div>
       )}
-      {/* Purchase details modal */}
-      {detailPurchaseId && detailRows.length > 0 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
-          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg border border-gray-300 bg-white">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <h3 className="text-lg font-bold text-black">
-                Purchase Details — {detailRows[0].supplier_invoice_number}
-              </h3>
-              <button
-                onClick={() => setDetailPurchaseId(null)}
-                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="px-6 py-4">
-              <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                <div>
-                  <span className="text-gray-500">Supplier:</span>{' '}
-                  <span className="font-medium">{detailRows[0].supplier_name || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Invoice #:</span>{' '}
-                  <span className="font-medium">{detailRows[0].supplier_invoice_number || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Purchase Date:</span>{' '}
-                  <span className="font-medium">{detailRows[0].purchase_date || 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">Tally Sync:</span>{' '}
-                  <span className="font-medium capitalize">
-                    {(detailRows[0].tally_sync_status || 'not_synced').replace('_', ' ')}
-                  </span>
-                </div>
-              </div>
-
-              <table className="w-full border border-gray-300 text-sm">
-                <thead className="bg-[#e0e0e0] text-gray-700">
-                  <tr>
-                    <th className="border-r border-gray-300 px-2 py-1.5 text-left">Product</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Batch</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Qty</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Buying</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Selling</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Tally</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Expiry</th>
-                    <th className="border-r border-gray-300 px-2 py-1.5">Tax%</th>
-                    <th className="px-2 py-1.5">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detailRows.map((r, i) => (
-                    <tr key={i} className="border-t border-gray-200">
-                      <td className="border-r border-gray-200 px-2 py-1.5">{r.product_name}</td>
-                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                        {r.batch || '—'}
-                      </td>
-                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                        {r.quantity} {r.unit || ''}
-                      </td>
-                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                        ₹{r.buying_price}
-                      </td>
-                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                        ₹{r.selling_price}
-                      </td>
-                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                        ₹{r.tally_price}
-                      </td>
-                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">
-                        {r.expiry_date || '—'}
-                      </td>
-                      <td className="border-r border-gray-200 px-2 py-1.5 text-center">{r.tax}%</td>
-                      <td className="px-2 py-1.5 text-center">₹{r.total_price.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-gray-300 bg-[#e0e0e0] font-semibold">
-                    <td className="border-r border-gray-300 px-2 py-2" colSpan={8}>
-                      Grand Total
-                    </td>
-                    <td className="px-2 py-2 text-center">
-                      ₹{detailRows.reduce((s, r) => s + r.total_price, 0).toFixed(2)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-            <div className="flex justify-end border-t border-gray-200 px-6 py-3">
-              <button
-                onClick={() => setDetailPurchaseId(null)}
-                className="rounded-md bg-gray-200 px-5 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {invoices.length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-6">
           <h3 className="text-lg font-bold text-black mb-4">Purchase History</h3>
-          <DataTable columns={columns} data={tableData} dense pageSize={10} />
+          <table className="w-full text-sm">
+            <thead className="border-b border-gray-200">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Supplier Name</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Invoice #</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Date</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Total</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groupedInvoices.map((g) => (
+                <Fragment key={g.header.id}>
+                  <tr
+                    onClick={() =>
+                      setExpandedInvoiceId(
+                        expandedInvoiceId === String(g.header.id) ? null : String(g.header.id),
+                      )
+                    }
+                    className="cursor-pointer border-b border-gray-100 hover:bg-gray-50"
+                  >
+                    <td className="px-4 py-3 text-sm text-gray-900">{g.header.supplier_name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{g.header.supplier_invoice_number}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{g.header.purchase_date || ''}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">₹{g.total.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      {g.header.tally_sync_enabled ? (
+                        <TallyStatusCell
+                          type="purchase"
+                          invoiceId={g.header.id}
+                          status={g.header.tally_sync_status || 'not_synced'}
+                          response={g.header.tally_response}
+                          onSynced={refresh}
+                        />
+                      ) : (
+                        <span
+                          className="text-xs text-gray-400"
+                          title="This purchase was created with Tally sync off — not sent to Tally"
+                        >
+                          Not synced
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setExpandedInvoiceId(
+                              expandedInvoiceId === String(g.header.id) ? null : String(g.header.id),
+                            )
+                          }}
+                          className="rounded bg-blue-50 px-2 py-1 text-blue-700 hover:bg-blue-100"
+                          title="Expand / collapse"
+                        >
+                          {expandedInvoiceId === String(g.header.id) ? (
+                            <ChevronUp size={16} />
+                          ) : (
+                            <ChevronDown size={16} />
+                          )}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            printInvoice(g)
+                          }}
+                          className="rounded bg-gray-100 px-2 py-1 text-gray-700 hover:bg-gray-200"
+                          title="Print invoice (PDF)"
+                        >
+                          <Printer size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedInvoiceId === String(g.header.id) && (
+                    <tr>
+                      <td colSpan={6} className="bg-gray-50 px-4 py-4">
+                        <p className="font-semibold text-black mb-2">Invoice Details</p>
+                        <div className="grid grid-cols-3 gap-2 text-sm text-gray-700 mb-4">
+                          <div>
+                            <span className="text-gray-500">Supplier Name</span>
+                            <p className="font-medium text-black">{g.header.supplier_name}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Invoice Number</span>
+                            <p className="font-medium text-black">{g.header.supplier_invoice_number}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-500">Purchase Date</span>
+                            <p className="font-medium text-black">{g.header.purchase_date || '—'}</p>
+                          </div>
+                        </div>
+                        <table className="w-full border border-gray-300 text-sm">
+                          <thead className="bg-[#e0e0e0] text-gray-700">
+                            <tr>
+                              <th className="border-r border-gray-200 px-2 py-1.5 text-left">Product</th>
+                              <th className="border-r border-gray-200 px-2 py-1.5 text-center">Batch</th>
+                              <th className="border-r border-gray-200 px-2 py-1.5 text-center">Qty</th>
+                              <th className="border-r border-gray-200 px-2 py-1.5 text-right">Buying Price</th>
+                              <th className="border-r border-gray-200 px-2 py-1.5 text-right">Selling Price</th>
+                              <th className="border-r border-gray-200 px-2 py-1.5 text-right">Tally Selling Price</th>
+                              <th className="px-2 py-1.5 text-center">Expiry</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.items.map((it, i) => (
+                              <tr key={i} className="border-t border-gray-200">
+                                <td className="border-r border-gray-200 px-2 py-1.5">{it.product_name}</td>
+                                <td className="border-r border-gray-200 px-2 py-1.5 text-center">{it.batch || '—'}</td>
+                                <td className="border-r border-gray-200 px-2 py-1.5 text-center">{it.unit ? `${it.quantity} ${it.unit}` : it.quantity}</td>
+                                <td className="border-r border-gray-200 px-2 py-1.5 text-right">₹{it.buying_price}</td>
+                                <td className="border-r border-gray-200 px-2 py-1.5 text-right">Rs.{it.selling_price}</td>
+                                <td className="border-r border-gray-200 px-2 py-1.5 text-right">Rs.{it.tally_price}</td>
+                                <td className="px-2 py-1.5 text-center">{it.expiry_date || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
