@@ -330,7 +330,9 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
       ),
     })
     const xml = buildSalesVoucherXml(input)
+    console.log('[FarmStack→Tally] Sales voucher XML sent:\n' + xml)
     const raw = await postXml(xml)
+    console.log('[Tally] Sales voucher response:\n' + raw)
     const parsed = parseTallyResponse(raw)
     const outcome: SyncOutcome = {
       status: parsed.success ? 'synced' : 'failed',

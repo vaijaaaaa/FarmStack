@@ -36,6 +36,24 @@ function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100
 }
 
+// When a sale's total invoice amount (Tally-price basis) is at least this, the
+// sale is split into 3 SEPARATE sales vouchers for Tally. XML-only — the app
+// keeps one invoice.
+export const SALES_SPLIT_THRESHOLD = 50000
+
+// Proportional split (40% / 40% / 20%). For a ₹50,000 value this yields
+// ₹20,000 + ₹20,000 + ₹10,000 across the 3 vouchers.
+const SALES_SPLIT_RATIOS = [0.4, 0.4, 0.2] as const
+
+// Split an amount into 3 parts (40/40/20). The 3rd part takes the remainder so
+// the parts sum back to the original EXACTLY — no rounding mismatch.
+export function splitAmountIntoThree(amount: number): number[] {
+  const a1 = round2(amount * SALES_SPLIT_RATIOS[0])
+  const a2 = round2(amount * SALES_SPLIT_RATIOS[1])
+  const a3 = round2(amount - a1 - a2)
+  return [a1, a2, a3]
+}
+
 // Single source of truth for GST maths.
 //  - Exempted (gstRate <= 0): every tax rate/amount is 0.
 //  - Local:      CGST = SGST = gstRate / 2, IGST = 0.
@@ -191,13 +209,12 @@ function gstByRate(items: VoucherItem[]): Map<number, RateGroup> {
 // Build the rate-wise GST <LEDGERENTRIES.LIST> block and its amount total.
 //  Purchase: deemedPositive=true, sign=-1 (input tax debit).
 //  Sales:    deemedPositive=false, sign=+1 (output tax credit).
-function buildGstEntries(
-  items: VoucherItem[],
+function gstEntriesFromGroups(
+  groups: Map<number, RateGroup>,
   ledgers: { cgst: string; sgst: string; igst: string },
   deemedPositive: boolean,
   sign: 1 | -1,
 ): { xml: string; total: number } {
-  const groups = gstByRate(items)
   let xml = ''
   let total = 0
   for (const rate of [...groups.keys()].sort((a, b) => a - b)) {
@@ -216,6 +233,35 @@ function buildGstEntries(
     }
   }
   return { xml, total: round2(total) }
+}
+
+// Build the rate-wise GST <LEDGERENTRIES.LIST> block and its amount total.
+//  Purchase: deemedPositive=true, sign=-1 (input tax debit).
+//  Sales:    deemedPositive=false, sign=+1 (output tax credit).
+function buildGstEntries(
+  items: VoucherItem[],
+  ledgers: { cgst: string; sgst: string; igst: string },
+  deemedPositive: boolean,
+  sign: 1 | -1,
+): { xml: string; total: number } {
+  return gstEntriesFromGroups(gstByRate(items), ledgers, deemedPositive, sign)
+}
+
+// The i-th slice (0..2) of GST groups: each duty-head amount split 40/40/20 with
+// the remainder on the 3rd slice, so the 3 slices' GST sums back EXACTLY.
+function sliceGstGroups(groups: Map<number, RateGroup>, sliceIndex: number): Map<number, RateGroup> {
+  const out = new Map<number, RateGroup>()
+  for (const [rate, g] of groups) {
+    out.set(rate, {
+      cgstRate: g.cgstRate,
+      sgstRate: g.sgstRate,
+      igstRate: g.igstRate,
+      cgst: splitAmountIntoThree(g.cgst)[sliceIndex],
+      sgst: splitAmountIntoThree(g.sgst)[sliceIndex],
+      igst: splitAmountIntoThree(g.igst)[sliceIndex],
+    })
+  }
+  return out
 }
 
 function inventoryEntry(it: VoucherItem, deemedPositive: boolean, signedAmount: number): string {
@@ -262,9 +308,18 @@ function ledgerEntry(name: string, deemedPositive: boolean, amount: number): str
 }
 
 function envelope(voucher: string): string {
+  return envelopeVouchers([voucher])
+}
+
+// Wrap one or more <VOUCHER> blocks, each in its own TALLYMESSAGE, so a single
+// import can create multiple vouchers (used by the ₹50k+ sales 3-voucher split).
+function envelopeVouchers(vouchers: string[]): string {
   const companyVar = TALLY_COMPANY
     ? `<SVCURRENTCOMPANY>${esc(TALLY_COMPANY)}</SVCURRENTCOMPANY>`
     : ''
+  const messages = vouchers
+    .map((v) => `        <TALLYMESSAGE xmlns:UDF="TallyUDF">\n${v}\n        </TALLYMESSAGE>`)
+    .join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <ENVELOPE>
   <HEADER>
@@ -277,9 +332,7 @@ function envelope(voucher: string): string {
         <STATICVARIABLES>${companyVar}</STATICVARIABLES>
       </REQUESTDESC>
       <REQUESTDATA>
-        <TALLYMESSAGE xmlns:UDF="TallyUDF">
-${voucher}
-        </TALLYMESSAGE>
+${messages}
       </REQUESTDATA>
     </IMPORTDATA>
   </BODY>
@@ -325,26 +378,17 @@ export function buildPurchaseVoucherXml(input: VoucherInput): string {
   return envelope(voucher)
 }
 
-export function buildSalesVoucherXml(input: VoucherInput): string {
-  const base = input.items.reduce((s, it) => s + it.baseAmount, 0)
-  // Rate-wise output tax: local => Output CGST/SGST @ rate, interstate =>
-  // Output IGST @ rate, exempted => nothing.
-  const gst = buildGstEntries(
-    input.items,
-    { cgst: GST_LEDGERS.outputCgst, sgst: GST_LEDGERS.outputSgst, igst: GST_LEDGERS.outputIgst },
-    false,
-    1,
-  )
-  const total = base + gst.total
-
-  const inventory = input.items
-    .map((it) => inventoryEntry(it, false, it.baseAmount))
-    .join('')
-
-  const gstEntries = gst.xml
-
+// Build a single <VOUCHER> for a sales invoice (or one slice of a split sale).
+function oneSalesVoucher(
+  input: VoucherInput,
+  partyTotal: number,
+  gstXml: string,
+  inventoryXml: string,
+  reference: string,
+  includeEway: boolean,
+): string {
   const eway =
-    input.ewayBillNo || input.dispatchFrom || input.vehicleNumber
+    includeEway && (input.ewayBillNo || input.dispatchFrom || input.vehicleNumber)
       ? `
             <BASICSHIPPEDTO>${esc(input.shipTo || '')}</BASICSHIPPEDTO>
             <CONSIGNEEMAILINGNAME>${esc(input.dispatchFrom || '')}</CONSIGNEEMAILINGNAME>
@@ -356,23 +400,81 @@ export function buildSalesVoucherXml(input: VoucherInput): string {
               <VEHICLENUMBER>${esc(input.vehicleNumber || '')}</VEHICLENUMBER>
             </EWAYBILLDETAILS.LIST>`
       : ''
-
-  const voucher = `          <VOUCHER VCHTYPE="Sales" ACTION="Create" OBJVIEW="Invoice Voucher View">
+  return `          <VOUCHER VCHTYPE="Sales" ACTION="Create" OBJVIEW="Invoice Voucher View">
             <DATE>${tallyDate(input.date)}</DATE>
             <EFFECTIVEDATE>${tallyDate(input.date)}</EFFECTIVEDATE>
             <VOUCHERTYPENAME>Sales</VOUCHERTYPENAME>
             <ISINVOICE>Yes</ISINVOICE>
             <VCHENTRYMODE>Item Invoice</VCHENTRYMODE>
             <PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW>
-            <REFERENCE>${esc(input.reference || input.voucherNumber || '')}</REFERENCE>
+            <REFERENCE>${esc(reference)}</REFERENCE>
             <PARTYLEDGERNAME>${esc(input.partyLedger)}</PARTYLEDGERNAME>
             <PARTYNAME>${esc(input.partyLedger)}</PARTYNAME>
             <NARRATION>${esc(input.narration || '')}</NARRATION>${eway}
             <LEDGERENTRIES.LIST>
               <LEDGERNAME>${esc(input.partyLedger)}</LEDGERNAME>
               <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
-              <AMOUNT>${money(-total)}</AMOUNT>
-            </LEDGERENTRIES.LIST>${gstEntries}${inventory}
+              <AMOUNT>${money(-partyTotal)}</AMOUNT>
+            </LEDGERENTRIES.LIST>${gstXml}${inventoryXml}
           </VOUCHER>`
-  return envelope(voucher)
+}
+
+export function buildSalesVoucherXml(input: VoucherInput): string {
+  const outputLedgers = {
+    cgst: GST_LEDGERS.outputCgst,
+    sgst: GST_LEDGERS.outputSgst,
+    igst: GST_LEDGERS.outputIgst,
+  }
+  const base = round2(input.items.reduce((s, it) => s + it.baseAmount, 0))
+  // Rate-wise output tax (local => CGST/SGST, interstate => IGST, exempt => none).
+  const fullGroups = gstByRate(input.items)
+  const fullGst = gstEntriesFromGroups(fullGroups, outputLedgers, false, 1)
+  const total = round2(base + fullGst.total)
+  const baseRef = input.reference || input.voucherNumber || ''
+
+  // Below ₹50,000 (Tally-price basis) → one normal voucher (unchanged).
+  if (total < SALES_SPLIT_THRESHOLD) {
+    const inventory = input.items.map((it) => inventoryEntry(it, false, it.baseAmount)).join('')
+    return envelope(oneSalesVoucher(input, total, fullGst.xml, inventory, baseRef, true))
+  }
+
+  // ₹50,000+ → 3 SEPARATE sales vouchers, each a proportional slice (40/40/20)
+  // of every item's quantity + amount AND of the GST. The app keeps one invoice;
+  // only the Tally XML is split. The 3 vouchers sum back to the original exactly.
+  const origQty = round2(input.items.reduce((s, it) => s + it.quantity, 0))
+  const vouchers: string[] = []
+  let sumBase = 0
+  let sumGst = 0
+  let sumQty = 0
+  let sumTotal = 0
+  for (let s = 0; s < 3; s++) {
+    const sliceItems = input.items.map((it) => ({
+      ...it,
+      baseAmount: splitAmountIntoThree(it.baseAmount)[s],
+      quantity: splitAmountIntoThree(it.quantity)[s],
+    }))
+    const sliceBase = round2(sliceItems.reduce((a, it) => a + it.baseAmount, 0))
+    const sliceGst = gstEntriesFromGroups(sliceGstGroups(fullGroups, s), outputLedgers, false, 1)
+    const sliceTotal = round2(sliceBase + sliceGst.total)
+    const inventory = sliceItems.map((it) => inventoryEntry(it, false, it.baseAmount)).join('')
+    vouchers.push(
+      oneSalesVoucher(input, sliceTotal, sliceGst.xml, inventory, `${baseRef} - ${s + 1}/3`, s === 0),
+    )
+    sumBase = round2(sumBase + sliceBase)
+    sumGst = round2(sumGst + sliceGst.total)
+    sumQty = round2(sumQty + sliceItems.reduce((a, it) => a + it.quantity, 0))
+    sumTotal = round2(sumTotal + sliceTotal)
+  }
+  // Reconciliation guard — the 3 vouchers MUST sum to the original exactly.
+  if (
+    sumBase !== base ||
+    sumGst !== round2(fullGst.total) ||
+    sumQty !== origQty ||
+    sumTotal !== total
+  ) {
+    throw new Error(
+      `Sales split reconciliation failed: base ${base}/${sumBase}, gst ${round2(fullGst.total)}/${sumGst}, qty ${origQty}/${sumQty}, total ${total}/${sumTotal}`,
+    )
+  }
+  return envelopeVouchers(vouchers)
 }
