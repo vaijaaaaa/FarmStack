@@ -124,40 +124,64 @@ export function stockItemMessage(
   const u = baseUnit || 'Nos'
   const rate = Number(opts.gstRate || 0)
   const hsn = String(opts.hsn ?? '').trim()
-  // When the product has a GST rate, declare full GST details on the stock
-  // item. Without this, Tally's GST purchase (Input Tax Credit) processing
-  // cannot reconcile the tax and silently drops the item from the voucher.
-  let gst = ''
-  if (rate > 0) {
-    const half = rate / 2
-    gst = `
-        <GSTAPPLICABLE>Applicable</GSTAPPLICABLE>
-        <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>
+  const half = rate / 2
+  const taxable = rate > 0 ? 'Taxable' : 'Exempt'
+
+  // HSN details — TallyPrime 3.0 stores HSN/SAC in its own dated list and only
+  // treats it as item-level when SRCOFHSNDETAILS = "Specify Details Here".
+  // (The tag is SRCOFHSNDETAILS, NOT SOURCEOFHSNDETAILS — confirmed against a
+  // Tally-exported master. The wrong tag is silently dropped and Tally then
+  // shows "As per Company/Stock Group".)
+  let hsnBlock = ''
+  if (hsn) {
+    hsnBlock = `
+        <HSNDETAILS.LIST>
+          <APPLICABLEFROM>20170701</APPLICABLEFROM>
+          <HSNCODE>${esc(hsn)}</HSNCODE>
+          <SRCOFHSNDETAILS>Specify Details Here</SRCOFHSNDETAILS>
+        </HSNDETAILS.LIST>`
+  }
+
+  // GST rate details — confirmed against a Tally-exported master: the duty
+  // heads are CGST / SGST/UTGST / IGST (NOT "Central Tax"/"State Tax"/...),
+  // and the item must declare SRCOFGSTDETAILS = "Specify Details Here" to hold
+  // its own rate. Wrong tags/heads make Tally drop the STATEWISEDETAILS list
+  // and the rate shows as 0%.
+  const gstBlock = `
         <GSTDETAILS.LIST>
           <APPLICABLEFROM>20170701</APPLICABLEFROM>
-          <CALCULATIONTYPE>On Value</CALCULATIONTYPE>
-          <HSNCODE>${esc(hsn)}</HSNCODE>
-          <TAXABILITY>Taxable</TAXABILITY>
+          <TAXABILITY>${taxable}</TAXABILITY>
+          <SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>
+          <GSTCALCSLABONMRP>No</GSTCALCSLABONMRP>
+          <ISREVERSECHARGEAPPLICABLE>No</ISREVERSECHARGEAPPLICABLE>
+          <ISNONGSTGOODS>No</ISNONGSTGOODS>
+          <GSTINELIGIBLEITC>No</GSTINELIGIBLEITC>
+          <INCLUDEEXPFORSLABCALC>No</INCLUDEEXPFORSLABCALC>
           <STATEWISEDETAILS.LIST>
-            <STATENAME>Any</STATENAME>
+            <STATENAME>&#4; Any</STATENAME>
             <RATEDETAILS.LIST>
               <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
-              <GSTRATE>${half}</GSTRATE>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              ${rate > 0 ? `<GSTRATE>${half}</GSTRATE>` : ''}
             </RATEDETAILS.LIST>
             <RATEDETAILS.LIST>
               <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>
-              <GSTRATE>${half}</GSTRATE>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              ${rate > 0 ? `<GSTRATE>${half}</GSTRATE>` : ''}
             </RATEDETAILS.LIST>
             <RATEDETAILS.LIST>
               <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
-              <GSTRATE>${rate}</GSTRATE>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              ${rate > 0 ? `<GSTRATE>${rate}</GSTRATE>` : ''}
             </RATEDETAILS.LIST>
           </STATEWISEDETAILS.LIST>
         </GSTDETAILS.LIST>`
-  }
+
   return `<STOCKITEM NAME="${esc(name)}" ACTION="Create">
         <NAME>${esc(name)}</NAME>
-        <BASEUNITS>${esc(u)}</BASEUNITS>${gst}
+        <BASEUNITS>${esc(u)}</BASEUNITS>
+        <GSTAPPLICABLE>Applicable</GSTAPPLICABLE>
+        <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>${hsnBlock}${gstBlock}
       </STOCKITEM>`
 }
 
