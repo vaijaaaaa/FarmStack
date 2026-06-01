@@ -4,7 +4,8 @@ import { getTranslation } from '@/lib/translations'
 import { useCustomers, useProducts, usePurchaseInvoices, useSalesInvoices } from '@/hooks/useDatabase'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { ChevronDown, ChevronUp, Printer } from 'lucide-react'
+import { ChevronDown, ChevronUp, Download, Filter, Printer } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import TallyStatusCell from '../components/TallyStatusCell'
 
 // Today's date as YYYY-MM-DD (local time) for date inputs.
@@ -100,6 +101,18 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const [showNewInvoice, setShowNewInvoice] = useState(false)
   const [historyTab, setHistoryTab] = useState<'all' | 'cash' | 'credit'>('all')
   const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null)
+  // ----- Sales history filters -------------------------------------------
+  const [showFilterPanel, setShowFilterPanel] = useState(false)
+  const [filterCustomerId, setFilterCustomerId] = useState('')
+  const [filterProductId, setFilterProductId] = useState('')
+  const [filterFromDate, setFilterFromDate] = useState('')
+  const [filterToDate, setFilterToDate] = useState('')
+  const [filterCustomerSearch, setFilterCustomerSearch] = useState('')
+  const [filterProductSearch, setFilterProductSearch] = useState('')
+  const [filterCustomerOpen, setFilterCustomerOpen] = useState(false)
+  const [filterProductOpen, setFilterProductOpen] = useState(false)
+  const filterPanelRef = useRef<HTMLDivElement>(null)
+  const filterButtonRef = useRef<HTMLButtonElement>(null)
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedTallyName, setSelectedTallyName] = useState('Cash')
@@ -177,6 +190,36 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     return () => document.removeEventListener('mousedown', onClick)
   }, [customerOpen])
 
+  // When the filter panel closes, collapse the inner search dropdowns so it
+  // opens fresh next time (no stale open list).
+  useEffect(() => {
+    if (showFilterPanel) return
+    setFilterCustomerOpen(false)
+    setFilterProductOpen(false)
+  }, [showFilterPanel])
+
+  // Close the filter panel on outside click or ESC (returning focus to button).
+  useEffect(() => {
+    if (!showFilterPanel) return
+    const onClick = (e: MouseEvent) => {
+      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target as Node)) {
+        setShowFilterPanel(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowFilterPanel(false)
+        filterButtonRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [showFilterPanel])
+
   const filteredCustomers = mockCustomers.filter((c) => {
     const q = customerSearch.trim().toLowerCase()
     if (!q) return true
@@ -250,13 +293,113 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
 
   // ----- Sales history ----------------------------------------------------
   // Sales history is invoice-level (each invoice already carries its items[]).
-  // The Cash/Credit tabs filter by the derived sale_type.
-  const visibleInvoices = invoices.filter(
-    (inv) => historyTab === 'all' || (inv.sale_type || 'cash') === historyTab,
-  )
+  // The Cash/Credit tabs filter by the derived sale_type; the filter panel adds
+  // customer / product / date-range filters (all combine with AND).
+  const visibleInvoices = invoices.filter((inv) => {
+    if (historyTab !== 'all' && (inv.sale_type || 'cash') !== historyTab) return false
+    if (filterCustomerId && String(inv.customer_id) !== filterCustomerId) return false
+    if (filterProductId && !inv.items.some((it) => String(it.product_id) === filterProductId)) {
+      return false
+    }
+    const d = inv.date || new Date(inv.created_at).toISOString().split('T')[0]
+    if (filterFromDate && d < filterFromDate) return false
+    if (filterToDate && d > filterToDate) return false
+    return true
+  })
+
+  const activeFilterCount =
+    (filterCustomerId ? 1 : 0) +
+    (filterProductId ? 1 : 0) +
+    (filterFromDate ? 1 : 0) +
+    (filterToDate ? 1 : 0)
+
+  const clearFilters = () => {
+    setFilterCustomerId('')
+    setFilterProductId('')
+    setFilterFromDate('')
+    setFilterToDate('')
+    setFilterCustomerSearch('')
+    setFilterProductSearch('')
+  }
 
   const saleDate = (inv: SalesInvoice) =>
     inv.date || new Date(inv.created_at).toISOString().split('T')[0]
+
+  // Export the (filtered) sales history to a formatted .xlsx file. One row per
+  // product line, repeating the invoice-level fields, so no data is lost.
+  const exportToExcel = () => {
+    if (visibleInvoices.length === 0) {
+      toast.error('No sales to export')
+      return
+    }
+    const headers = [
+      'Customer Name',
+      'Tally Name',
+      'Sale Type',
+      'Sale Date',
+      'Invoice Total',
+      'Tally Sync Status',
+      'Created Date',
+      'Product Name',
+      'Batch Number',
+      'Quantity',
+      'Unit',
+      'Selling Price',
+      'Tally Selling Price',
+      'Expiry Date',
+      'Ledger Type',
+      'Tax %',
+      'Row Total',
+    ]
+    const rows: (string | number)[][] = [headers]
+    for (const inv of visibleInvoices) {
+      const customer = mockCustomers.find((c) => c.id === inv.customer_id)
+      for (const it of inv.items) {
+        const product = mockProducts.find((p) => p.id === it.product_id)
+        const rowTotal = it.quantity * it.rate * (1 + it.gst / 100)
+        rows.push([
+          String(inv.customer_name || customer?.name || ''),
+          String(inv.tally_name ?? ''),
+          (inv.sale_type || 'cash') === 'credit' ? 'Credit Sale' : 'Cash Sale',
+          saleDate(inv),
+          Number(inv.total || 0),
+          String(inv.tally_sync_status || 'not_synced'),
+          String(inv.created_at ?? ''),
+          String(product?.name ?? ''),
+          String(it.batch ?? ''),
+          Number(it.quantity || 0),
+          String(it.unit || product?.unit || ''),
+          Number(it.rate || 0),
+          Number(it.tally_price || 0),
+          String(product?.expiry_date ?? ''),
+          String(it.type ?? ''),
+          Number(it.gst || 0),
+          Number(rowTotal.toFixed(2)),
+        ])
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    for (let c = 0; c < headers.length; c++) {
+      const ref = XLSX.utils.encode_cell({ r: 0, c })
+      if (ws[ref]) ws[ref].s = { font: { bold: true } }
+    }
+    ws['!cols'] = headers.map((h, c) => {
+      const maxLen = rows.reduce((m, row) => Math.max(m, String(row[c] ?? '').length), h.length)
+      return { wch: Math.min(40, maxLen + 2) }
+    })
+    ws['!freeze'] = { xSplit: 0, ySplit: 1 }
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Sales')
+    const stamp = todayISO()
+    const name =
+      activeFilterCount > 0 || historyTab !== 'all'
+        ? `sales_invoices_filtered_${stamp}.xlsx`
+        : `sales_invoices_${stamp}.xlsx`
+    XLSX.writeFile(wb, name)
+    toast.success('Sales invoices exported')
+  }
 
   // Open a printable sale invoice in a new window (user can Save as PDF).
   const printSaleInvoice = (inv: SalesInvoice) => {
@@ -551,12 +694,195 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-black">{t('sales_invoice')}</h2>
-        <Button
-          onClick={() => setShowNewInvoice(!showNewInvoice)}
-          className="bg-black text-white hover:bg-gray-900"
-        >
-          {showNewInvoice ? 'Cancel' : 'Create Sale'}
-        </Button>
+        <div className="flex items-center gap-3">
+          {/* Filter (left of Create Sale) */}
+          <div ref={filterPanelRef} className="relative">
+            <Button
+              ref={filterButtonRef}
+              type="button"
+              variant="ghost"
+              onClick={() => setShowFilterPanel((o) => !o)}
+              className={`relative z-40 inline-flex items-center gap-2 border bg-white text-gray-700 shadow-none hover:bg-gray-100 hover:text-black ${
+                showFilterPanel ? 'border-black bg-gray-100 text-black' : 'border-gray-300'
+              }`}
+            >
+              <Filter size={16} />
+              Filter
+              {activeFilterCount > 0 && (
+                <span className="ml-1 rounded-full bg-black px-1.5 text-xs font-semibold text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </Button>
+
+            {showFilterPanel && (
+              <div className="absolute right-0 top-full z-30 mt-2 max-h-[calc(100vh-12rem)] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-gray-300 bg-white p-4">
+                <h4 className="mb-3 text-sm font-semibold text-black">Filter Sales</h4>
+
+                {/* Customer Name — searchable dropdown */}
+                <div className="relative mb-3">
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Customer Name</label>
+                  <input
+                    type="text"
+                    value={
+                      filterCustomerId
+                        ? mockCustomers.find((c) => c.id === filterCustomerId)?.name || ''
+                        : filterCustomerSearch
+                    }
+                    placeholder="Search Customer..."
+                    onChange={(e) => {
+                      setFilterCustomerSearch(e.target.value)
+                      setFilterCustomerId('')
+                      setFilterCustomerOpen(true)
+                      setFilterProductOpen(false)
+                    }}
+                    onFocus={() => {
+                      setFilterCustomerOpen(true)
+                      setFilterProductOpen(false)
+                    }}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                  />
+                  {filterCustomerOpen && (
+                    <div className="mt-1 max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
+                      {mockCustomers
+                        .filter((c) =>
+                          c.name.toLowerCase().includes(filterCustomerSearch.toLowerCase()),
+                        )
+                        .map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setFilterCustomerId(c.id)
+                              setFilterCustomerSearch('')
+                              setFilterCustomerOpen(false)
+                            }}
+                            className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-100"
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      {mockCustomers.filter((c) =>
+                        c.name.toLowerCase().includes(filterCustomerSearch.toLowerCase()),
+                      ).length === 0 && (
+                        <p className="px-3 py-2 text-xs text-gray-500">No customers found</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Product Name — searchable dropdown */}
+                <div className="relative mb-3">
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Product Name</label>
+                  <input
+                    type="text"
+                    value={
+                      filterProductId
+                        ? mockProducts.find((p) => p.id === filterProductId)?.name || ''
+                        : filterProductSearch
+                    }
+                    placeholder="Search Product..."
+                    onChange={(e) => {
+                      setFilterProductSearch(e.target.value)
+                      setFilterProductId('')
+                      setFilterProductOpen(true)
+                      setFilterCustomerOpen(false)
+                    }}
+                    onFocus={() => {
+                      setFilterProductOpen(true)
+                      setFilterCustomerOpen(false)
+                    }}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                  />
+                  {filterProductOpen && (
+                    <div className="mt-1 max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
+                      {mockProducts
+                        .filter((p) =>
+                          p.name.toLowerCase().includes(filterProductSearch.toLowerCase()),
+                        )
+                        .map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              setFilterProductId(p.id)
+                              setFilterProductSearch('')
+                              setFilterProductOpen(false)
+                            }}
+                            className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-100"
+                          >
+                            {p.name}
+                          </button>
+                        ))}
+                      {mockProducts.filter((p) =>
+                        p.name.toLowerCase().includes(filterProductSearch.toLowerCase()),
+                      ).length === 0 && (
+                        <p className="px-3 py-2 text-xs text-gray-500">No products found</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Date range */}
+                <div className="mb-4 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">From Date</label>
+                    <input
+                      type="date"
+                      value={filterFromDate}
+                      onChange={(e) => setFilterFromDate(e.target.value)}
+                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">To Date</label>
+                    <input
+                      type="date"
+                      value={filterToDate}
+                      onChange={(e) => setFilterToDate(e.target.value)}
+                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+                  >
+                    Clear Filters
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFilterPanel(false)}
+                    className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900"
+                  >
+                    Apply Filters
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Export to Excel (respects active filters) */}
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={exportToExcel}
+            className="inline-flex items-center gap-2 border border-gray-300 bg-white text-gray-700 shadow-none hover:bg-gray-100 hover:text-black"
+          >
+            <Download size={16} />
+            Export
+          </Button>
+
+          <Button
+            onClick={() => setShowNewInvoice(!showNewInvoice)}
+            className="bg-black text-white hover:bg-gray-900"
+          >
+            {showNewInvoice ? 'Cancel' : 'Create Sale'}
+          </Button>
+        </div>
       </div>
 
       {showNewInvoice && (
@@ -1328,6 +1654,13 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                   </Fragment>
                 )
               })}
+              {visibleInvoices.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                    No sales match the selected filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

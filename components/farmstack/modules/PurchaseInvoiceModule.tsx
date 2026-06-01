@@ -458,6 +458,14 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     return () => window.removeEventListener('scroll', onScroll, true)
   }, [showSupplierDropdown])
 
+  // When the filter panel closes, collapse the inner search dropdowns so it
+  // opens fresh next time (no stale open list).
+  useEffect(() => {
+    if (showFilterPanel) return
+    setFilterSupplierOpen(false)
+    setFilterProductOpen(false)
+  }, [showFilterPanel])
+
   // Close the filter panel on outside click or ESC (returning focus to button).
   useEffect(() => {
     if (!showFilterPanel) return
