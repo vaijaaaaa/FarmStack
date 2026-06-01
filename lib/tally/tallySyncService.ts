@@ -140,14 +140,26 @@ export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
   }
 
   try {
-    const sup = await queryOne<{ gstin: string }>(
-      'SELECT gstin FROM suppliers WHERE id = ?',
+    const sup = await queryOne<{
+      gstin: string
+      address: string
+      state: string
+      country: string
+      place_of_supply: string
+      phone: string
+    }>(
+      'SELECT gstin, address, state, country, place_of_supply, phone FROM suppliers WHERE id = ?',
       [String(inv.supplier_id || '')],
     )
     await ensureMastersForVoucher({
       kind: 'purchase',
       partyName: input.partyLedger,
       partyGstin: sup?.gstin,
+      partyAddress: sup?.address,
+      // Place of Supply is the GST state; fall back to the address state.
+      partyState: sup?.place_of_supply || sup?.state,
+      partyCountry: sup?.country,
+      partyPhone: sup?.phone,
       items: await Promise.all(
         voucherItems.map(async (it, i) => ({
           productName: it.productName,
@@ -284,14 +296,29 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
   }
 
   try {
-    const cust = await queryOne<{ gstin: string }>(
-      'SELECT gstin FROM customers WHERE id = ?',
+    const cust = await queryOne<{
+      name: string
+      gstin: string
+      address: string
+      state: string
+      country: string
+      phone: string
+    }>(
+      'SELECT name, gstin, address, state, country, phone FROM customers WHERE id = ?',
       [String(inv.customer_id || '')],
     )
+    // Only attach customer mailing/GST details when the Tally party ledger is
+    // actually this customer (not a Cash sale posted under the Cash ledger).
+    const partyIsCustomer =
+      !!cust && input.partyLedger.trim().toLowerCase() === String(cust.name || '').trim().toLowerCase()
     await ensureMastersForVoucher({
       kind: 'sales',
       partyName: input.partyLedger,
-      partyGstin: cust?.gstin,
+      partyGstin: partyIsCustomer ? cust?.gstin : undefined,
+      partyAddress: partyIsCustomer ? cust?.address : undefined,
+      partyState: partyIsCustomer ? cust?.state : undefined,
+      partyCountry: partyIsCustomer ? cust?.country : undefined,
+      partyPhone: partyIsCustomer ? cust?.phone : undefined,
       items: await Promise.all(
         voucherItems.map(async (it, i) => ({
           productName: it.productName,

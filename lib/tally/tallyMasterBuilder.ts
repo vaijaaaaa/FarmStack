@@ -10,14 +10,21 @@ function esc(value: unknown): string {
     .replace(/'/g, '&apos;')
 }
 
-export function ledgerMessage(
-  name: string,
-  parent: string,
-  opts: { gstin?: string; billwise?: boolean } = {},
-): string {
-  const gstin = opts.gstin
-    ? `<PARTYGSTIN>${esc(opts.gstin)}</PARTYGSTIN><GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>`
-    : ''
+export interface LedgerOpts {
+  gstin?: string
+  billwise?: boolean
+  address?: string
+  state?: string
+  country?: string
+  phone?: string
+}
+
+// GST-era applicability date used by TallyPrime's dated "*.LIST" detail blocks.
+// A LIST block WITHOUT an APPLICABLEFROM date is silently ignored by Tally, so
+// every mailing/GST detail list must carry this.
+const GST_APPLICABLE_FROM = '20170701'
+
+export function ledgerMessage(name: string, parent: string, opts: LedgerOpts = {}): string {
   const billwise = opts.billwise ? '<ISBILLWISEON>Yes</ISBILLWISEON>' : ''
   // Purchase/Sales account ledgers are the accounting allocation for stock
   // items in item invoices. They MUST have "Inventory values are affected"
@@ -27,10 +34,63 @@ export function ledgerMessage(
     parent === 'Purchase Accounts' || parent === 'Sales Accounts'
       ? '<AFFECTSSTOCK>Yes</AFFECTSSTOCK>'
       : ''
+
+  const country = opts.country?.trim()
+  const state = opts.state?.trim()
+  const gstin = opts.gstin?.trim()
+  const address = opts.address?.trim()
+  const phone = opts.phone?.trim()
+
+  // ---- Top-level mailing / contact tags (per Tally sample XML) ----
+  let top = ''
+  if (country) top += `<COUNTRYNAME>${esc(country)}</COUNTRYNAME>`
+  if (state) top += `<LEDSTATENAME>${esc(state)}</LEDSTATENAME>`
+  if (gstin) {
+    top += `<GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>`
+    top += `<PARTYGSTIN>${esc(gstin)}</PARTYGSTIN>`
+  }
+  if (phone) {
+    top += `<LEDGERPHONE>${esc(phone)}</LEDGERPHONE>`
+    top += `<LEDGERMOBILE>${esc(phone)}</LEDGERMOBILE>`
+  }
+
+  // Only attach mailing-name / address lists for party ledgers that have them.
+  const hasMailing = !!(address || state || country)
+  let mailingLists = ''
+  if (hasMailing) {
+    mailingLists += `<MAILINGNAME.LIST TYPE="String"><MAILINGNAME>${esc(name)}</MAILINGNAME></MAILINGNAME.LIST>`
+    if (address) {
+      mailingLists += `<ADDRESS.LIST TYPE="String"><ADDRESS>${esc(address)}</ADDRESS></ADDRESS.LIST>`
+    }
+    // Dated mailing-details block — TallyPrime reads "Mailing Details"
+    // (address + state + country) from here. MUST carry APPLICABLEFROM.
+    mailingLists +=
+      `<LEDMAILINGDETAILS.LIST>` +
+      `<APPLICABLEFROM>${GST_APPLICABLE_FROM}</APPLICABLEFROM>` +
+      `<MAILINGNAME>${esc(name)}</MAILINGNAME>` +
+      (address ? `<ADDRESS.LIST TYPE="String"><ADDRESS>${esc(address)}</ADDRESS></ADDRESS.LIST>` : '') +
+      (state ? `<STATE>${esc(state)}</STATE>` : '') +
+      (country ? `<COUNTRY>${esc(country)}</COUNTRY>` : '') +
+      `</LEDMAILINGDETAILS.LIST>`
+  }
+
+  // Dated GST-registration block — populates Statutory > GST Registration
+  // Details (registration type + GSTIN/UIN). MUST carry APPLICABLEFROM.
+  let gstReg = ''
+  if (gstin) {
+    gstReg =
+      `<LEDGSTREGDETAILS.LIST>` +
+      `<APPLICABLEFROM>${GST_APPLICABLE_FROM}</APPLICABLEFROM>` +
+      `<GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>` +
+      (state ? `<PLACEOFSUPPLY>${esc(state)}</PLACEOFSUPPLY>` : '') +
+      `<GSTIN>${esc(gstin)}</GSTIN>` +
+      `</LEDGSTREGDETAILS.LIST>`
+  }
+
   return `<LEDGER NAME="${esc(name)}" ACTION="Create">
         <NAME>${esc(name)}</NAME>
         <PARENT>${esc(parent)}</PARENT>
-        ${affectsStock}${billwise}${gstin}
+        ${affectsStock}${billwise}${top}${mailingLists}${gstReg}
       </LEDGER>`
 }
 

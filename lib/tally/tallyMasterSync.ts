@@ -88,7 +88,17 @@ async function messagesForMaster(
     const name = r.tally_ledger_name || r.name
     return {
       label: `Supplier: ${name}`,
-      messages: [ledgerMessage(name, 'Sundry Creditors', { gstin: r.gstin, billwise: true })],
+      messages: [
+        ledgerMessage(name, 'Sundry Creditors', {
+          gstin: r.gstin,
+          billwise: true,
+          address: r.address,
+          // Place of Supply is the GST state; fall back to the address state.
+          state: r.place_of_supply || r.state,
+          country: r.country,
+          phone: r.phone,
+        }),
+      ],
     }
   }
   if (kind === 'customer') {
@@ -97,7 +107,16 @@ async function messagesForMaster(
     const name = r.tally_ledger_name || r.name
     return {
       label: `Customer: ${name}`,
-      messages: [ledgerMessage(name, 'Sundry Debtors', { gstin: r.gstin, billwise: true })],
+      messages: [
+        ledgerMessage(name, 'Sundry Debtors', {
+          gstin: r.gstin,
+          billwise: true,
+          address: r.address,
+          state: r.state,
+          country: r.country,
+          phone: r.phone,
+        }),
+      ],
     }
   }
   if (kind === 'product') {
@@ -223,6 +242,10 @@ export async function ensureMastersForVoucher(opts: {
   kind: 'purchase' | 'sales'
   partyName: string
   partyGstin?: string
+  partyAddress?: string
+  partyState?: string
+  partyCountry?: string
+  partyPhone?: string
   items: Array<{
     productName: string
     unit: string
@@ -237,7 +260,14 @@ export async function ensureMastersForVoucher(opts: {
       ledgerMessage(
         opts.partyName,
         opts.kind === 'purchase' ? 'Sundry Creditors' : 'Sundry Debtors',
-        { gstin: opts.partyGstin, billwise: true },
+        {
+          gstin: opts.partyGstin,
+          billwise: true,
+          address: opts.partyAddress,
+          state: opts.partyState,
+          country: opts.partyCountry,
+          phone: opts.partyPhone,
+        },
       ),
     )
   }
