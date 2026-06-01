@@ -4,7 +4,8 @@ import { getTranslation } from '@/lib/translations'
 import { useSuppliers, useProducts, useProductTypes, usePurchaseInvoices } from '@/hooks/useDatabase'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { ChevronDown, ChevronUp, Printer } from 'lucide-react'
+import { ChevronDown, ChevronUp, Download, Filter, Printer } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import TallyStatusCell from '../components/TallyStatusCell'
 
 // Today's date as YYYY-MM-DD (local time) for date inputs.
@@ -121,6 +122,18 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const [supplierSearchPerformed, setSupplierSearchPerformed] = useState(false)
   const supplierDropdownRef = useRef<HTMLDivElement>(null)
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null)
+  // ----- Purchase history filters ----------------------------------------
+  const [showFilterPanel, setShowFilterPanel] = useState(false)
+  const [filterSupplierId, setFilterSupplierId] = useState('')
+  const [filterProductId, setFilterProductId] = useState('')
+  const [filterFromDate, setFilterFromDate] = useState('')
+  const [filterToDate, setFilterToDate] = useState('')
+  const [filterSupplierSearch, setFilterSupplierSearch] = useState('')
+  const [filterProductSearch, setFilterProductSearch] = useState('')
+  const [filterSupplierOpen, setFilterSupplierOpen] = useState(false)
+  const [filterProductOpen, setFilterProductOpen] = useState(false)
+  const filterPanelRef = useRef<HTMLDivElement>(null)
+  const filterButtonRef = useRef<HTMLButtonElement>(null)
   const [showAddTypeModal, setShowAddTypeModal] = useState(false)
   const [currentTypeIndex, setCurrentTypeIndex] = useState<number | null>(null)
   const [newTypeName, setNewTypeName] = useState('')
@@ -445,6 +458,28 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     return () => window.removeEventListener('scroll', onScroll, true)
   }, [showSupplierDropdown])
 
+  // Close the filter panel on outside click or ESC (returning focus to button).
+  useEffect(() => {
+    if (!showFilterPanel) return
+    const onClick = (e: MouseEvent) => {
+      if (filterPanelRef.current && !filterPanelRef.current.contains(e.target as Node)) {
+        setShowFilterPanel(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowFilterPanel(false)
+        filterButtonRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [showFilterPanel])
+
   const handleSupplierSelect = (supplierId: string) => {
     if (supplierId === 'details') {
       setShowSupplierDetailsModal(true)
@@ -583,6 +618,111 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     }
     return [...map.values()]
   })()
+
+  // Apply the active history filters (supplier / product / date range). Filters
+  // combine with AND; product matches across the invoice's line items.
+  const filteredInvoices = groupedInvoices.filter((g) => {
+    if (filterSupplierId && String(g.header.supplier_id) !== filterSupplierId) return false
+    if (filterProductId && !g.items.some((it) => String(it.product_id) === filterProductId)) {
+      return false
+    }
+    const invDate = String(g.header.purchase_date || '')
+    if (filterFromDate && invDate && invDate < filterFromDate) return false
+    if (filterToDate && invDate && invDate > filterToDate) return false
+    if (filterFromDate && !invDate) return false
+    if (filterToDate && !invDate) return false
+    return true
+  })
+
+  const activeFilterCount =
+    (filterSupplierId ? 1 : 0) +
+    (filterProductId ? 1 : 0) +
+    (filterFromDate ? 1 : 0) +
+    (filterToDate ? 1 : 0)
+
+  const clearFilters = () => {
+    setFilterSupplierId('')
+    setFilterProductId('')
+    setFilterFromDate('')
+    setFilterToDate('')
+    setFilterSupplierSearch('')
+    setFilterProductSearch('')
+  }
+
+  // Export the (filtered) purchase history to a formatted .xlsx file. One row
+  // per product line, repeating the invoice-level fields, so no data is lost.
+  const exportToExcel = () => {
+    if (filteredInvoices.length === 0) {
+      toast.error('No purchases to export')
+      return
+    }
+    const headers = [
+      'Supplier Name',
+      'Invoice Number',
+      'Purchase Date',
+      'Invoice Total',
+      'Tally Sync Status',
+      'Created Date',
+      'Product Name',
+      'Batch Number',
+      'Quantity',
+      'Unit',
+      'Buying Price',
+      'Selling Price',
+      'Tally Selling Price',
+      'Expiry Date',
+      'Ledger Type',
+      'Tax %',
+      'Row Total',
+    ]
+    const rows: (string | number)[][] = [headers]
+    for (const g of filteredInvoices) {
+      for (const it of g.items) {
+        rows.push([
+          String(g.header.supplier_name ?? ''),
+          String(g.header.supplier_invoice_number ?? ''),
+          String(g.header.purchase_date ?? ''),
+          Number(g.total || 0),
+          String(g.header.tally_sync_status || 'not_synced'),
+          String(g.header.created_at ?? ''),
+          String(it.product_name ?? ''),
+          String(it.batch ?? ''),
+          Number(it.quantity || 0),
+          String(it.unit ?? ''),
+          Number(it.buying_price || 0),
+          Number(it.selling_price || 0),
+          Number(it.tally_price || 0),
+          String(it.expiry_date ?? ''),
+          String(it.type ?? ''),
+          Number(it.tax || 0),
+          Number(it.total_price || 0),
+        ])
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    // Bold header row.
+    for (let c = 0; c < headers.length; c++) {
+      const ref = XLSX.utils.encode_cell({ r: 0, c })
+      if (ws[ref]) ws[ref].s = { font: { bold: true } }
+    }
+    // Auto-ish column widths from the longest cell in each column.
+    ws['!cols'] = headers.map((h, c) => {
+      const maxLen = rows.reduce((m, row) => Math.max(m, String(row[c] ?? '').length), h.length)
+      return { wch: Math.min(40, maxLen + 2) }
+    })
+    // Freeze the header row.
+    ws['!freeze'] = { xSplit: 0, ySplit: 1 }
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Purchases')
+    const stamp = todayISO()
+    const name = activeFilterCount > 0
+      ? `purchase_invoices_filtered_${stamp}.xlsx`
+      : `purchase_invoices_${stamp}.xlsx`
+    XLSX.writeFile(wb, name)
+    toast.success('Purchase invoices exported')
+  }
 
   const printInvoice = (group: { header: PRow; items: PRow[]; total: number }) => {
     const w = window.open('', '_blank', 'width=820,height=920')
@@ -804,12 +944,195 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-black">{t('purchase_invoice')}</h2>
-        <Button
-          onClick={() => setShowNewInvoice(!showNewInvoice)}
-          className="bg-black text-white hover:bg-gray-900"
-        >
-          {showNewInvoice ? 'Cancel' : 'Create Purchase'}
-        </Button>
+        <div className="flex items-center gap-3">
+          {/* Filter (left of Create Purchase) */}
+          <div ref={filterPanelRef} className="relative">
+            <Button
+              ref={filterButtonRef}
+              type="button"
+              variant="ghost"
+              onClick={() => setShowFilterPanel((o) => !o)}
+              className={`relative z-40 inline-flex items-center gap-2 border bg-white text-gray-700 shadow-none hover:bg-gray-100 hover:text-black ${
+                showFilterPanel ? 'border-black bg-gray-100 text-black' : 'border-gray-300'
+              }`}
+            >
+              <Filter size={16} />
+              Filter
+              {activeFilterCount > 0 && (
+                <span className="ml-1 rounded-full bg-black px-1.5 text-xs font-semibold text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </Button>
+
+            {showFilterPanel && (
+              <div className="absolute right-0 top-full z-30 mt-2 max-h-[calc(100vh-12rem)] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-gray-300 bg-white p-4">
+                <h4 className="mb-3 text-sm font-semibold text-black">Filter Purchases</h4>
+
+                {/* Supplier Name — searchable dropdown */}
+                <div className="relative mb-3">
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Supplier Name</label>
+                  <input
+                    type="text"
+                    value={
+                      filterSupplierId
+                        ? mockSuppliers.find((s) => s.id === filterSupplierId)?.name || ''
+                        : filterSupplierSearch
+                    }
+                    placeholder="Search Supplier..."
+                    onChange={(e) => {
+                      setFilterSupplierSearch(e.target.value)
+                      setFilterSupplierId('')
+                      setFilterSupplierOpen(true)
+                      setFilterProductOpen(false)
+                    }}
+                    onFocus={() => {
+                      setFilterSupplierOpen(true)
+                      setFilterProductOpen(false)
+                    }}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                  />
+                  {filterSupplierOpen && (
+                    <div className="mt-1 max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
+                      {mockSuppliers
+                        .filter((s) =>
+                          s.name.toLowerCase().includes(filterSupplierSearch.toLowerCase()),
+                        )
+                        .map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => {
+                              setFilterSupplierId(s.id)
+                              setFilterSupplierSearch('')
+                              setFilterSupplierOpen(false)
+                            }}
+                            className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-100"
+                          >
+                            {s.name}
+                          </button>
+                        ))}
+                      {mockSuppliers.filter((s) =>
+                        s.name.toLowerCase().includes(filterSupplierSearch.toLowerCase()),
+                      ).length === 0 && (
+                        <p className="px-3 py-2 text-xs text-gray-500">No suppliers found</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Product Name — searchable dropdown */}
+                <div className="relative mb-3">
+                  <label className="mb-1 block text-xs font-medium text-gray-700">Product Name</label>
+                  <input
+                    type="text"
+                    value={
+                      filterProductId
+                        ? mockProducts.find((p) => p.id === filterProductId)?.name || ''
+                        : filterProductSearch
+                    }
+                    placeholder="Search Product..."
+                    onChange={(e) => {
+                      setFilterProductSearch(e.target.value)
+                      setFilterProductId('')
+                      setFilterProductOpen(true)
+                      setFilterSupplierOpen(false)
+                    }}
+                    onFocus={() => {
+                      setFilterProductOpen(true)
+                      setFilterSupplierOpen(false)
+                    }}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                  />
+                  {filterProductOpen && (
+                    <div className="mt-1 max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
+                      {mockProducts
+                        .filter((p) =>
+                          p.name.toLowerCase().includes(filterProductSearch.toLowerCase()),
+                        )
+                        .map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => {
+                              setFilterProductId(p.id)
+                              setFilterProductSearch('')
+                              setFilterProductOpen(false)
+                            }}
+                            className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-100"
+                          >
+                            {p.name}
+                          </button>
+                        ))}
+                      {mockProducts.filter((p) =>
+                        p.name.toLowerCase().includes(filterProductSearch.toLowerCase()),
+                      ).length === 0 && (
+                        <p className="px-3 py-2 text-xs text-gray-500">No products found</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Date range */}
+                <div className="mb-4 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">From Date</label>
+                    <input
+                      type="date"
+                      value={filterFromDate}
+                      onChange={(e) => setFilterFromDate(e.target.value)}
+                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-700">To Date</label>
+                    <input
+                      type="date"
+                      value={filterToDate}
+                      onChange={(e) => setFilterToDate(e.target.value)}
+                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+                  >
+                    Clear Filters
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFilterPanel(false)}
+                    className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900"
+                  >
+                    Apply Filters
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Export to Excel (respects active filters) */}
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={exportToExcel}
+            className="inline-flex items-center gap-2 border border-gray-300 bg-white text-gray-700 shadow-none hover:bg-gray-100 hover:text-black"
+          >
+            <Download size={16} />
+            Export
+          </Button>
+
+          <Button
+            onClick={() => setShowNewInvoice(!showNewInvoice)}
+            className="bg-black text-white hover:bg-gray-900"
+          >
+            {showNewInvoice ? 'Cancel' : 'Create Purchase'}
+          </Button>
+        </div>
       </div>
 
       {showNewInvoice && (
@@ -1833,7 +2156,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
               </tr>
             </thead>
             <tbody>
-              {groupedInvoices.map((g) => (
+              {filteredInvoices.map((g) => (
                 <Fragment key={g.header.id}>
                   <tr
                     onClick={() =>
@@ -1945,6 +2268,13 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                   )}
                 </Fragment>
               ))}
+              {filteredInvoices.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                    No purchases match the selected filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
