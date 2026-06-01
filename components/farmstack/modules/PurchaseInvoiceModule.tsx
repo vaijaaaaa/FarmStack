@@ -953,187 +953,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-black">{t('purchase_invoice')}</h2>
         <div className="flex items-center gap-3">
-          {/* Filter (left of Create Purchase) */}
-          <div ref={filterPanelRef} className="relative">
-            <Button
-              ref={filterButtonRef}
-              type="button"
-              variant="ghost"
-              onClick={() => setShowFilterPanel((o) => !o)}
-              className={`relative z-40 inline-flex items-center gap-2 border bg-white text-gray-700 shadow-none hover:bg-gray-100 hover:text-black ${
-                showFilterPanel ? 'border-black bg-gray-100 text-black' : 'border-gray-300'
-              }`}
-            >
-              <Filter size={16} />
-              Filter
-              {activeFilterCount > 0 && (
-                <span className="ml-1 rounded-full bg-black px-1.5 text-xs font-semibold text-white">
-                  {activeFilterCount}
-                </span>
-              )}
-            </Button>
-
-            {showFilterPanel && (
-              <div className="absolute right-0 top-full z-30 mt-2 max-h-[calc(100vh-12rem)] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-gray-300 bg-white p-4">
-                <h4 className="mb-3 text-sm font-semibold text-black">Filter Purchases</h4>
-
-                {/* Supplier Name — searchable dropdown */}
-                <div className="relative mb-3">
-                  <label className="mb-1 block text-xs font-medium text-gray-700">Supplier Name</label>
-                  <input
-                    type="text"
-                    value={
-                      filterSupplierId
-                        ? mockSuppliers.find((s) => s.id === filterSupplierId)?.name || ''
-                        : filterSupplierSearch
-                    }
-                    placeholder="Search Supplier..."
-                    onChange={(e) => {
-                      setFilterSupplierSearch(e.target.value)
-                      setFilterSupplierId('')
-                      setFilterSupplierOpen(true)
-                      setFilterProductOpen(false)
-                    }}
-                    onFocus={() => {
-                      setFilterSupplierOpen(true)
-                      setFilterProductOpen(false)
-                    }}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
-                  />
-                  {filterSupplierOpen && (
-                    <div className="mt-1 max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
-                      {mockSuppliers
-                        .filter((s) =>
-                          s.name.toLowerCase().includes(filterSupplierSearch.toLowerCase()),
-                        )
-                        .map((s) => (
-                          <button
-                            key={s.id}
-                            type="button"
-                            onClick={() => {
-                              setFilterSupplierId(s.id)
-                              setFilterSupplierSearch('')
-                              setFilterSupplierOpen(false)
-                            }}
-                            className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-100"
-                          >
-                            {s.name}
-                          </button>
-                        ))}
-                      {mockSuppliers.filter((s) =>
-                        s.name.toLowerCase().includes(filterSupplierSearch.toLowerCase()),
-                      ).length === 0 && (
-                        <p className="px-3 py-2 text-xs text-gray-500">No suppliers found</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Product Name — searchable dropdown */}
-                <div className="relative mb-3">
-                  <label className="mb-1 block text-xs font-medium text-gray-700">Product Name</label>
-                  <input
-                    type="text"
-                    value={
-                      filterProductId
-                        ? mockProducts.find((p) => p.id === filterProductId)?.name || ''
-                        : filterProductSearch
-                    }
-                    placeholder="Search Product..."
-                    onChange={(e) => {
-                      setFilterProductSearch(e.target.value)
-                      setFilterProductId('')
-                      setFilterProductOpen(true)
-                      setFilterSupplierOpen(false)
-                    }}
-                    onFocus={() => {
-                      setFilterProductOpen(true)
-                      setFilterSupplierOpen(false)
-                    }}
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
-                  />
-                  {filterProductOpen && (
-                    <div className="mt-1 max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
-                      {mockProducts
-                        .filter((p) =>
-                          p.name.toLowerCase().includes(filterProductSearch.toLowerCase()),
-                        )
-                        .map((p) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              setFilterProductId(p.id)
-                              setFilterProductSearch('')
-                              setFilterProductOpen(false)
-                            }}
-                            className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-100"
-                          >
-                            {p.name}
-                          </button>
-                        ))}
-                      {mockProducts.filter((p) =>
-                        p.name.toLowerCase().includes(filterProductSearch.toLowerCase()),
-                      ).length === 0 && (
-                        <p className="px-3 py-2 text-xs text-gray-500">No products found</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Date range */}
-                <div className="mb-4 grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-700">From Date</label>
-                    <input
-                      type="date"
-                      value={filterFromDate}
-                      onChange={(e) => setFilterFromDate(e.target.value)}
-                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-gray-700">To Date</label>
-                    <input
-                      type="date"
-                      value={filterToDate}
-                      onChange={(e) => setFilterToDate(e.target.value)}
-                      className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={clearFilters}
-                    className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
-                  >
-                    Clear Filters
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowFilterPanel(false)}
-                    className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900"
-                  >
-                    Apply Filters
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Export to Excel (respects active filters) */}
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={exportToExcel}
-            className="inline-flex items-center gap-2 border border-gray-300 bg-white text-gray-700 shadow-none hover:bg-gray-100 hover:text-black"
-          >
-            <Download size={16} />
-            Export
-          </Button>
-
           <Button
             onClick={() => setShowNewInvoice(!showNewInvoice)}
             className="bg-black text-white hover:bg-gray-900"
@@ -2151,7 +1970,191 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       )}
       {invoices.length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <h3 className="text-lg font-bold text-black mb-4">Purchase History</h3>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-lg font-bold text-black">Purchase History</h3>
+            <div className="flex items-center gap-3">
+              {/* Filter */}
+              <div ref={filterPanelRef} className="relative">
+                <Button
+                  ref={filterButtonRef}
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setShowFilterPanel((o) => !o)}
+                  className={`relative z-40 inline-flex items-center gap-2 border bg-white text-gray-700 shadow-none hover:bg-gray-100 hover:text-black ${
+                    showFilterPanel ? 'border-black bg-gray-100 text-black' : 'border-gray-300'
+                  }`}
+                >
+                  <Filter size={16} />
+                  Filter
+                  {activeFilterCount > 0 && (
+                    <span className="ml-1 rounded-full bg-black px-1.5 text-xs font-semibold text-white">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </Button>
+
+                {showFilterPanel && (
+                  <div className="absolute right-0 top-full z-30 mt-2 max-h-[calc(100vh-12rem)] w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-gray-300 bg-white p-4">
+                    <h4 className="mb-3 text-sm font-semibold text-black">Filter Purchases</h4>
+
+                    {/* Supplier Name — searchable dropdown */}
+                    <div className="relative mb-3">
+                      <label className="mb-1 block text-xs font-medium text-gray-700">Supplier Name</label>
+                      <input
+                        type="text"
+                        value={
+                          filterSupplierId
+                            ? mockSuppliers.find((s) => s.id === filterSupplierId)?.name || ''
+                            : filterSupplierSearch
+                        }
+                        placeholder="Search Supplier..."
+                        onChange={(e) => {
+                          setFilterSupplierSearch(e.target.value)
+                          setFilterSupplierId('')
+                          setFilterSupplierOpen(true)
+                          setFilterProductOpen(false)
+                        }}
+                        onFocus={() => {
+                          setFilterSupplierOpen(true)
+                          setFilterProductOpen(false)
+                        }}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                      />
+                      {filterSupplierOpen && (
+                        <div className="mt-1 max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
+                          {mockSuppliers
+                            .filter((s) =>
+                              s.name.toLowerCase().includes(filterSupplierSearch.toLowerCase()),
+                            )
+                            .map((s) => (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => {
+                                  setFilterSupplierId(s.id)
+                                  setFilterSupplierSearch('')
+                                  setFilterSupplierOpen(false)
+                                }}
+                                className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-100"
+                              >
+                                {s.name}
+                              </button>
+                            ))}
+                          {mockSuppliers.filter((s) =>
+                            s.name.toLowerCase().includes(filterSupplierSearch.toLowerCase()),
+                          ).length === 0 && (
+                            <p className="px-3 py-2 text-xs text-gray-500">No suppliers found</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Product Name — searchable dropdown */}
+                    <div className="relative mb-3">
+                      <label className="mb-1 block text-xs font-medium text-gray-700">Product Name</label>
+                      <input
+                        type="text"
+                        value={
+                          filterProductId
+                            ? mockProducts.find((p) => p.id === filterProductId)?.name || ''
+                            : filterProductSearch
+                        }
+                        placeholder="Search Product..."
+                        onChange={(e) => {
+                          setFilterProductSearch(e.target.value)
+                          setFilterProductId('')
+                          setFilterProductOpen(true)
+                          setFilterSupplierOpen(false)
+                        }}
+                        onFocus={() => {
+                          setFilterProductOpen(true)
+                          setFilterSupplierOpen(false)
+                        }}
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                      />
+                      {filterProductOpen && (
+                        <div className="mt-1 max-h-44 overflow-y-auto rounded-md border border-gray-200 bg-white">
+                          {mockProducts
+                            .filter((p) =>
+                              p.name.toLowerCase().includes(filterProductSearch.toLowerCase()),
+                            )
+                            .map((p) => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  setFilterProductId(p.id)
+                                  setFilterProductSearch('')
+                                  setFilterProductOpen(false)
+                                }}
+                                className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-gray-100"
+                              >
+                                {p.name}
+                              </button>
+                            ))}
+                          {mockProducts.filter((p) =>
+                            p.name.toLowerCase().includes(filterProductSearch.toLowerCase()),
+                          ).length === 0 && (
+                            <p className="px-3 py-2 text-xs text-gray-500">No products found</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Date range */}
+                    <div className="mb-4 grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-700">From Date</label>
+                        <input
+                          type="date"
+                          value={filterFromDate}
+                          onChange={(e) => setFilterFromDate(e.target.value)}
+                          className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-700">To Date</label>
+                        <input
+                          type="date"
+                          value={filterToDate}
+                          onChange={(e) => setFilterToDate(e.target.value)}
+                          className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={clearFilters}
+                        className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-300"
+                      >
+                        Clear Filters
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowFilterPanel(false)}
+                        className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900"
+                      >
+                        Apply Filters
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Export to Excel (respects active filters) */}
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={exportToExcel}
+                className="inline-flex items-center gap-2 border border-gray-300 bg-white text-gray-700 shadow-none hover:bg-gray-100 hover:text-black"
+              >
+                <Download size={16} />
+                Export
+              </Button>
+            </div>
+          </div>
           <table className="w-full text-sm">
             <thead className="border-b border-gray-200">
               <tr>
