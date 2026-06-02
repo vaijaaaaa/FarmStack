@@ -14,6 +14,10 @@ node_modules
 .next/
 .DS_Store
 
+# Claude Code local worktrees (these are nested git repos — committing them
+# creates a stray submodule gitlink that breaks Vercel's clone)
+.claude/worktrees/
+
 # Local SQLite database
 farmstack.db
 farmstack.db-journal
