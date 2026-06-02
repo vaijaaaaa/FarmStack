@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Language } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import { mockSyncLogs } from '@/lib/mock-data'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { tallyApi, getStoredTallyUrl, TALLY_URL_STORAGE_KEY } from '@/src/services/api'
 
 interface TallySyncModuleProps {
   language: Language
@@ -10,15 +12,54 @@ interface TallySyncModuleProps {
 
 export default function TallySyncModule({ language }: TallySyncModuleProps) {
   const t = (key: string) => getTranslation(language, key)
-  const [syncLogs, setSyncLogs] = useState(mockSyncLogs)
-  const [isSyncing, setIsSyncing] = useState(false)
+  const [syncLogs] = useState(mockSyncLogs)
+  const [tallyUrl, setTallyUrl] = useState('')
+  const [conn, setConn] = useState<{
+    state: 'unknown' | 'checking' | 'ok' | 'fail'
+    message: string
+  }>({ state: 'unknown', message: '' })
 
-  const handleSync = () => {
-    setIsSyncing(true)
-    setTimeout(() => {
-      setIsSyncing(false)
-    }, 2000)
+  const checkConnection = async () => {
+    setConn({ state: 'checking', message: 'Checking connection…' })
+    const res = await tallyApi.status()
+    setConn({ state: res.connected ? 'ok' : 'fail', message: res.message })
   }
+
+  // Load the saved Tally URL and test the connection on first open.
+  useEffect(() => {
+    setTallyUrl(getStoredTallyUrl())
+    checkConnection()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleSaveUrl = () => {
+    const cleaned = tallyUrl.trim().replace(/\/+$/, '')
+    localStorage.setItem(TALLY_URL_STORAGE_KEY, cleaned)
+    setTallyUrl(cleaned)
+    toast.success(
+      cleaned
+        ? 'Tally Server URL saved'
+        : 'Cleared — using default (this computer’s localhost:9000)',
+    )
+    checkConnection()
+  }
+
+  const dot =
+    conn.state === 'ok'
+      ? 'bg-green-500'
+      : conn.state === 'fail'
+        ? 'bg-red-500'
+        : conn.state === 'checking'
+          ? 'bg-yellow-400'
+          : 'bg-gray-300'
+  const statusLabel =
+    conn.state === 'ok'
+      ? 'Connected'
+      : conn.state === 'fail'
+        ? 'Not connected'
+        : conn.state === 'checking'
+          ? 'Checking…'
+          : 'Unknown'
 
   return (
     <div className="space-y-6">
@@ -28,40 +69,59 @@ export default function TallySyncModule({ language }: TallySyncModuleProps) {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold text-black">Tally Connection</h3>
-            <p className="mt-1 text-sm text-gray-600">Status and sync configuration</p>
+            <p className="mt-1 text-sm text-gray-600">
+              Tell the app where your Tally is running.
+            </p>
           </div>
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2">
-              <div className="h-3 w-3 rounded-full bg-green-500"></div>
-              <span className="text-sm font-medium text-green-700">{t('connected')}</span>
-            </div>
-            <p className="text-xs text-gray-500">Last sync: 2 hours ago</p>
-          </div>
-        </div>
-
-        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="rounded-lg bg-gray-50 p-4">
-            <p className="text-xs font-medium uppercase text-gray-600">Pending Items</p>
-            <p className="mt-2 text-2xl font-bold text-black">2</p>
-          </div>
-          <div className="rounded-lg bg-gray-50 p-4">
-            <p className="text-xs font-medium uppercase text-gray-600">Synced Today</p>
-            <p className="mt-2 text-2xl font-bold text-black">4</p>
-          </div>
-          <div className="rounded-lg bg-gray-50 p-4">
-            <p className="text-xs font-medium uppercase text-gray-600">Failed</p>
-            <p className="mt-2 text-2xl font-bold text-black">1</p>
+          <div className="flex items-center gap-2">
+            <div className={`h-3 w-3 rounded-full ${dot}`}></div>
+            <span
+              className={`text-sm font-medium ${
+                conn.state === 'ok'
+                  ? 'text-green-700'
+                  : conn.state === 'fail'
+                    ? 'text-red-700'
+                    : 'text-gray-600'
+              }`}
+            >
+              {statusLabel}
+            </span>
           </div>
         </div>
 
-        <div className="mt-6">
-          <Button
-            onClick={handleSync}
-            disabled={isSyncing}
-            className="bg-black text-white hover:bg-gray-900 disabled:opacity-50"
-          >
-            {isSyncing ? 'Syncing...' : t('sync')}
-          </Button>
+        <div className="mt-5">
+          <label className="mb-1.5 block text-sm font-medium text-gray-700">
+            Tally Server URL
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="text"
+              value={tallyUrl}
+              onChange={(e) => setTallyUrl(e.target.value)}
+              placeholder="http://localhost:9000  (or your tunnel URL, e.g. https://xxxx.trycloudflare.com)"
+              className="min-w-[260px] flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+            />
+            <Button onClick={handleSaveUrl} className="bg-black text-white hover:bg-gray-900">
+              Save
+            </Button>
+            <Button onClick={checkConnection} variant="outline">
+              Test Connection
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            Running the app on the <b>same PC as Tally</b>? Leave this blank (it uses
+            localhost:9000). Using the <b>cloud / Vercel site</b>? Run a tunnel on the Tally
+            computer and paste the URL it gives you here.
+          </p>
+          {conn.message && (
+            <p
+              className={`mt-2 text-xs ${
+                conn.state === 'ok' ? 'text-green-700' : 'text-red-600'
+              }`}
+            >
+              {conn.message}
+            </p>
+          )}
         </div>
       </div>
 

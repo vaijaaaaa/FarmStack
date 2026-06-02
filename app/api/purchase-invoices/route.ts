@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { query, execute, transaction, newId, nowIso } from '@/lib/db'
 import { syncPurchaseInvoice } from '@/lib/tally/tallySyncService'
+import { setTallyUrlForRequest } from '@/lib/tally/tallyContext'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -59,6 +60,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  setTallyUrlForRequest(request)
   try {
     const body = await request.json()
     const supplierId = String(body.supplier_id ?? '').trim()

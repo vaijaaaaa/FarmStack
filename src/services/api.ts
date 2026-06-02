@@ -1,9 +1,22 @@
-// Thin client for the local SQLite-backed API routes.
+// Thin client for the API routes.
 import type { Customer, Supplier, Product, ProductType, SalesInvoice } from '@/types/farmstack'
+
+// The Tally server URL the user configured (their localhost, or a tunnel URL).
+// Stored in the browser and sent on every request so the server posts to the
+// right Tally. Empty => server falls back to its default (localhost:9000).
+export const TALLY_URL_STORAGE_KEY = 'farmstack_tally_url'
+export function getStoredTallyUrl(): string {
+  if (typeof window === 'undefined') return ''
+  return localStorage.getItem(TALLY_URL_STORAGE_KEY) || ''
+}
+function tallyHeader(): Record<string, string> {
+  const url = getStoredTallyUrl().trim()
+  return url ? { 'x-tally-url': url } : {}
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...tallyHeader() },
     ...init,
   })
   const data = await res.json().catch(() => null)
@@ -159,7 +172,7 @@ export const invoiceApi = {
 export const tallyApi = {
   status: async (): Promise<TallyConnection> => {
     try {
-      const res = await fetch('/api/tally')
+      const res = await fetch('/api/tally', { headers: tallyHeader() })
       const data = await res.json().catch(() => null)
       if (data && typeof data.connected === 'boolean') return data
       return { connected: false, message: 'Could not check Tally connection' }
@@ -179,7 +192,7 @@ export const tallyApi = {
     }),
   listLedgers: async (): Promise<{ ledgers: { name: string; parent: string }[]; error?: string }> => {
     try {
-      const res = await fetch('/api/tally/ledgers')
+      const res = await fetch('/api/tally/ledgers', { headers: tallyHeader() })
       const data = await res.json().catch(() => null)
       if (data && Array.isArray(data.ledgers)) {
         return { ledgers: data.ledgers, error: data.error }

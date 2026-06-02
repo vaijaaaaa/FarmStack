@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { checkTallyConnection } from '@/lib/tally/tallyClient'
+import { setTallyUrlForRequest } from '@/lib/tally/tallyContext'
 import { syncPurchaseInvoice, syncSalesInvoice } from '@/lib/tally/tallySyncService'
 import {
   syncMasterById,
@@ -14,7 +15,8 @@ export const dynamic = 'force-dynamic'
 const MASTER_KINDS: MasterKind[] = ['supplier', 'customer', 'product', 'product_type']
 
 // Connection check.
-export async function GET() {
+export async function GET(request: Request) {
+  setTallyUrlForRequest(request)
   const result = await checkTallyConnection()
   return NextResponse.json(result, { status: result.connected ? 200 : 503 })
 }
@@ -24,6 +26,7 @@ export async function GET() {
 //  - master:  { type: 'supplier'|'customer'|'product'|'product_type', id }
 //  - bulk:    { action: 'sync-masters', masters: BulkEntry[] }
 export async function POST(request: Request) {
+  setTallyUrlForRequest(request)
   try {
     const body = await request.json()
 

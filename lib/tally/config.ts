@@ -1,6 +1,16 @@
 // Tally connection + ledger configuration. Override via env vars if your
 // TallyPrime company uses different ledger names.
+import { currentTallyUrl } from './tallyContext'
+
 export const TALLY_URL = process.env.TALLY_URL || 'http://localhost:9000'
+
+// The Tally URL to use for the current request: the per-request value the
+// browser sent (its own localhost, or a tunnel URL) wins; otherwise fall back
+// to the env/default. Trailing slashes are trimmed.
+export function resolveTallyUrl(): string {
+  const fromRequest = currentTallyUrl()
+  return (fromRequest || TALLY_URL).replace(/\/+$/, '')
+}
 
 // Empty => Tally uses whichever company is currently open.
 export const TALLY_COMPANY = process.env.TALLY_COMPANY || ''

@@ -1,5 +1,9 @@
 // Server-side HTTP client for TallyPrime. Never call this from the browser.
-import { TALLY_URL, TALLY_TIMEOUT_MS } from './config'
+import { resolveTallyUrl, TALLY_TIMEOUT_MS } from './config'
+
+// Sent on every Tally request so ngrok free tunnels skip their browser-warning
+// interstitial (harmless for direct localhost / Cloudflare tunnels).
+const TUNNEL_HEADERS = { 'ngrok-skip-browser-warning': 'true' }
 
 export interface ConnectionResult {
   connected: boolean
@@ -10,18 +14,19 @@ export interface ConnectionResult {
 function friendlyConnError(err: unknown): string {
   const msg = (err as Error)?.message || String(err)
   if (/abort|timeout/i.test(msg)) {
-    return 'TallyPrime is not responding (timeout). Check if it is running at ' + TALLY_URL
+    return 'TallyPrime is not responding (timeout). Check if it is running at ' + resolveTallyUrl()
   }
   if (/ECONNREFUSED|fetch failed|refused|network/i.test(msg)) {
-    return 'TallyPrime is not running. Please open TallyPrime and enable the HTTP server at ' + TALLY_URL
+    return 'TallyPrime is not running. Please open TallyPrime and enable the HTTP server at ' + resolveTallyUrl()
   }
   return `Could not reach TallyPrime: ${msg}`
 }
 
 export async function checkTallyConnection(): Promise<ConnectionResult> {
   try {
-    const res = await fetch(TALLY_URL, {
+    const res = await fetch(resolveTallyUrl(), {
       method: 'GET',
+      headers: TUNNEL_HEADERS,
       signal: AbortSignal.timeout(Math.min(TALLY_TIMEOUT_MS, 8000)),
     })
     const raw = await res.text()
@@ -42,9 +47,9 @@ export async function checkTallyConnection(): Promise<ConnectionResult> {
 export async function postXml(xml: string): Promise<string> {
   let res: Response
   try {
-    res = await fetch(TALLY_URL, {
+    res = await fetch(resolveTallyUrl(), {
       method: 'POST',
-      headers: { 'Content-Type': 'text/xml;charset=utf-8' },
+      headers: { 'Content-Type': 'text/xml;charset=utf-8', ...TUNNEL_HEADERS },
       body: xml,
       signal: AbortSignal.timeout(TALLY_TIMEOUT_MS),
     })
