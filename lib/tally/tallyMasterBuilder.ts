@@ -41,13 +41,20 @@ export function ledgerMessage(name: string, parent: string, opts: LedgerOpts = {
   const address = opts.address?.trim()
   const phone = opts.phone?.trim()
 
+  // GST registration type is derived purely from GSTIN presence: a party with a
+  // GSTIN is "Regular"; without one it is "Unregistered/Consumer" (never Regular
+  // with a blank GSTIN). Only party ledgers (Sundry Debtors/Creditors) carry a
+  // GST registration type — purchase/sales/tax ledgers must not.
+  const isParty = parent === 'Sundry Debtors' || parent === 'Sundry Creditors'
+  const regType = gstin ? 'Regular' : 'Unregistered/Consumer'
+
   // ---- Top-level mailing / contact tags (per Tally sample XML) ----
   let top = ''
   if (country) top += `<COUNTRYNAME>${esc(country)}</COUNTRYNAME>`
   if (state) top += `<LEDSTATENAME>${esc(state)}</LEDSTATENAME>`
-  if (gstin) {
-    top += `<GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>`
-    top += `<PARTYGSTIN>${esc(gstin)}</PARTYGSTIN>`
+  if (isParty) {
+    top += `<GSTREGISTRATIONTYPE>${regType}</GSTREGISTRATIONTYPE>`
+    if (gstin) top += `<PARTYGSTIN>${esc(gstin)}</PARTYGSTIN>`
   }
   if (phone) {
     top += `<LEDGERPHONE>${esc(phone)}</LEDGERPHONE>`
@@ -76,14 +83,15 @@ export function ledgerMessage(name: string, parent: string, opts: LedgerOpts = {
 
   // Dated GST-registration block — populates Statutory > GST Registration
   // Details (registration type + GSTIN/UIN). MUST carry APPLICABLEFROM.
+  // Emitted for every party ledger; GSTIN tag only when a GSTIN exists.
   let gstReg = ''
-  if (gstin) {
+  if (isParty) {
     gstReg =
       `<LEDGSTREGDETAILS.LIST>` +
       `<APPLICABLEFROM>${GST_APPLICABLE_FROM}</APPLICABLEFROM>` +
-      `<GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>` +
+      `<GSTREGISTRATIONTYPE>${regType}</GSTREGISTRATIONTYPE>` +
       (state ? `<PLACEOFSUPPLY>${esc(state)}</PLACEOFSUPPLY>` : '') +
-      `<GSTIN>${esc(gstin)}</GSTIN>` +
+      (gstin ? `<GSTIN>${esc(gstin)}</GSTIN>` : '') +
       `</LEDGSTREGDETAILS.LIST>`
   }
 
