@@ -116,12 +116,25 @@ export function unitMessage(name: string): string {
       </UNIT>`
 }
 
+// A top-level Tally Stock Group (under Primary). Stock items are placed under
+// the group that matches the product's FarmStack category (Fertilizers, etc.).
+export function stockGroupMessage(name: string): string {
+  return `<STOCKGROUP NAME="${esc(name)}" ACTION="Create">
+        <NAME>${esc(name)}</NAME>
+        <PARENT></PARENT>
+      </STOCKGROUP>`
+}
+
 export function stockItemMessage(
   name: string,
   baseUnit: string,
-  opts: { hsn?: string; gstRate?: number } = {},
+  opts: { hsn?: string; gstRate?: number; stockGroup?: string } = {},
 ): string {
   const u = baseUnit || 'Nos'
+  // The product's category becomes the Tally Stock Group ("Under"). Blank =>
+  // Tally defaults to Primary.
+  const parent = String(opts.stockGroup ?? '').trim()
+  const parentTag = parent ? `<PARENT>${esc(parent)}</PARENT>` : ''
   const rate = Number(opts.gstRate || 0)
   const hsn = String(opts.hsn ?? '').trim()
   const half = rate / 2
@@ -179,6 +192,7 @@ export function stockItemMessage(
 
   return `<STOCKITEM NAME="${esc(name)}" ACTION="Create">
         <NAME>${esc(name)}</NAME>
+        ${parentTag}
         <BASEUNITS>${esc(u)}</BASEUNITS>
         <GSTAPPLICABLE>Applicable</GSTAPPLICABLE>
         <GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>${hsnBlock}${gstBlock}

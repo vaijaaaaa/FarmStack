@@ -77,6 +77,16 @@ async function productHsn(productId: string): Promise<string> {
   return row?.hsn_code || ''
 }
 
+// The product's category (product_type) — becomes its Tally Stock Group.
+async function productCategory(productId: string): Promise<string> {
+  if (!productId) return ''
+  const row = await queryOne<{ product_type: string }>(
+    'SELECT product_type FROM products WHERE id = ?',
+    [productId],
+  )
+  return row?.product_type || ''
+}
+
 // 'interstate' => IGST; anything else (incl. blank/exempted) => local CGST+SGST.
 async function productGstSupplyType(
   productId: string,
@@ -167,6 +177,7 @@ export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
           ledgerName: it.ledgerName,
           hsn: await productHsn(String(items[i]?.product_id || '')),
           gstRate: it.taxPercent,
+          productCategory: await productCategory(String(items[i]?.product_id || '')),
         })),
       ),
     })
@@ -326,6 +337,7 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
           ledgerName: it.ledgerName,
           hsn: await productHsn(String(items[i]?.product_id || '')),
           gstRate: it.taxPercent,
+          productCategory: await productCategory(String(items[i]?.product_id || '')),
         })),
       ),
     })

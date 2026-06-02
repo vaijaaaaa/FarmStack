@@ -10,6 +10,7 @@ import {
   gstLedgerMessage,
   unitMessage,
   stockItemMessage,
+  stockGroupMessage,
   ledgerGroupForType,
   buildMastersEnvelope,
 } from './tallyMasterBuilder'
@@ -124,13 +125,15 @@ async function messagesForMaster(
     if (!r) return null
     const unit = r.unit || 'Nos'
     const name = r.tally_stock_item_name || r.name
-    return {
-      label: `Product: ${name}`,
-      messages: [
-        unitMessage(unit),
-        stockItemMessage(name, unit, { hsn: r.hsn_code, gstRate: Number(r.gst_rate) }),
-      ],
-    }
+    // The product's category is its Tally Stock Group ("Under"). Create the
+    // group first so the stock item can reference it.
+    const group = String(r.product_type || '').trim()
+    const messages: string[] = [unitMessage(unit)]
+    if (group) messages.push(stockGroupMessage(group))
+    messages.push(
+      stockItemMessage(name, unit, { hsn: r.hsn_code, gstRate: Number(r.gst_rate), stockGroup: group }),
+    )
+    return { label: `Product: ${name}`, messages }
   }
   const r = await queryOne<any>('SELECT * FROM product_types WHERE id = ?', [id])
   if (!r) return null
@@ -252,6 +255,7 @@ export async function ensureMastersForVoucher(opts: {
     ledgerName: string
     hsn?: string
     gstRate?: number
+    productCategory?: string
   }>
 }): Promise<void> {
   const messages: string[] = []
@@ -274,15 +278,25 @@ export async function ensureMastersForVoucher(opts: {
   const units = new Set<string>()
   const stock = new Set<string>()
   const ledgers = new Set<string>()
+  const groups = new Set<string>()
   for (const it of opts.items) {
     const unit = it.unit || 'Nos'
     if (!units.has(unit)) {
       units.add(unit)
       messages.push(unitMessage(unit))
     }
+    // Create the product's category as a Stock Group before its stock item so
+    // the item is placed under it (not Primary).
+    const group = String(it.productCategory || '').trim()
+    if (group && !groups.has(group)) {
+      groups.add(group)
+      messages.push(stockGroupMessage(group))
+    }
     if (it.productName && !stock.has(it.productName)) {
       stock.add(it.productName)
-      messages.push(stockItemMessage(it.productName, unit, { hsn: it.hsn, gstRate: it.gstRate }))
+      messages.push(
+        stockItemMessage(it.productName, unit, { hsn: it.hsn, gstRate: it.gstRate, stockGroup: group }),
+      )
     }
     if (it.ledgerName && !ledgers.has(it.ledgerName)) {
       ledgers.add(it.ledgerName)
