@@ -602,8 +602,8 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         quantity: r.quantity || '',
         batch: r.batch || '',
         buyingPrice: r.buyingPrice || productPrice,
-        sellingPrice: '',
-        tallyPrice: product?.tally_price != null ? String(product.tally_price) : '',
+        sellingPrice: r.sellingPrice || productPrice,
+        tallyPrice: r.tallyPrice || (product?.tally_price != null ? String(product.tally_price) : ''),
         expiryDate: r.expiryDate || product?.expiry_date || '',
         unit: product?.unit || '',
         productType: product?.product_type || '',
@@ -2217,22 +2217,15 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                     <td className="px-4 py-3 text-sm text-gray-900">{g.header.purchase_date || ''}</td>
                     <td className="px-4 py-3 text-sm text-gray-900">₹{g.total.toFixed(2)}</td>
                     <td className="px-4 py-3 text-sm text-gray-900">
-                      {g.header.tally_sync_enabled ? (
-                        <TallyStatusCell
-                          type="purchase"
-                          invoiceId={g.header.id}
-                          status={g.header.tally_sync_status || 'not_synced'}
-                          response={g.header.tally_response}
-                          onSynced={refresh}
-                        />
-                      ) : (
-                        <span
-                          className="text-xs text-gray-400"
-                          title="This purchase was created with Tally sync off — not sent to Tally"
-                        >
-                          Not synced
-                        </span>
-                      )}
+                      {/* Always show the Tally status cell so a purchase created
+                          with sync off can still be synced later via its button. */}
+                      <TallyStatusCell
+                        type="purchase"
+                        invoiceId={g.header.id}
+                        status={g.header.tally_sync_status || 'not_synced'}
+                        response={g.header.tally_response}
+                        onSynced={refresh}
+                      />
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-900">
                       <div className="flex items-center gap-2">

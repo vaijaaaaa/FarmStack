@@ -7,9 +7,11 @@ import { toast } from 'sonner'
 
 export interface ParsedPurchaseRow {
   productName: string
+  batch: string
   quantity: string
   buyingPrice: string
-  batch: string
+  sellingPrice: string
+  tallyPrice: string
   expiryDate: string
 }
 
@@ -23,12 +25,20 @@ interface BulkUploadModalProps {
   products: { id: string; name: string }[]
 }
 
-const EXPECTED_HEADERS = ['product_name', 'quantity', 'buying_price', 'batch', 'expiry_date']
+const EXPECTED_HEADERS = [
+  'product_name',
+  'batch',
+  'quantity',
+  'buying_price',
+  'selling_price',
+  'tally_price',
+  'expiry_date',
+]
 
 const TEMPLATE_CSV =
-  'product_name,quantity,buying_price,batch,expiry_date\n' +
-  'Urea,10,250,BATCH-001,2027-12-31\n' +
-  'DAP,5,1200,BATCH-002,2027-06-30'
+  'product_name,batch,quantity,buying_price,selling_price,tally_price,expiry_date\n' +
+  'Urea,BATCH-001,10,250,300,300,2027-12-31\n' +
+  'DAP,BATCH-002,5,1200,1400,1400,2027-06-30'
 
 export default function BulkUploadModal({ isOpen, onClose, onApply, products }: BulkUploadModalProps) {
   const [file, setFile] = useState<File | null>(null)
@@ -44,11 +54,15 @@ export default function BulkUploadModal({ isOpen, onClose, onApply, products }: 
   const productNames = new Set(products.map((p) => (p.name || '').trim().toLowerCase()))
 
   // Returns a warning for a row, or '' if it is valid (and will be added).
+  const isValidPrice = (v: string) => v.trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0
   const rowWarning = (row: ParsedPurchaseRow): string => {
     if (!row.productName.trim()) return 'Product name is required'
     if (!productNames.has(row.productName.trim().toLowerCase()))
       return 'Product not found — will be skipped'
     if (!(Number(row.quantity) > 0)) return 'Quantity must be greater than 0'
+    if (!isValidPrice(row.buyingPrice)) return 'Buying price is required'
+    if (!isValidPrice(row.sellingPrice)) return 'Selling price is required'
+    if (!isValidPrice(row.tallyPrice)) return 'Tally selling price is required'
     return ''
   }
 
@@ -81,14 +95,16 @@ export default function BulkUploadModal({ isOpen, onClose, onApply, products }: 
         return
       }
       const rows: ParsedPurchaseRow[] = lines.slice(1).map((line) => {
-        const [productName, quantity, buyingPrice, batch, expiryDate] = line
+        const [productName, batch, quantity, buyingPrice, sellingPrice, tallyPrice, expiryDate] = line
           .split(',')
           .map((s) => (s || '').trim())
         return {
           productName: productName || '',
+          batch: batch || '',
           quantity: quantity || '',
           buyingPrice: buyingPrice || '',
-          batch: batch || '',
+          sellingPrice: sellingPrice || '',
+          tallyPrice: tallyPrice || '',
           expiryDate: expiryDate || '',
         }
       })
@@ -169,9 +185,11 @@ export default function BulkUploadModal({ isOpen, onClose, onApply, products }: 
                 <thead>
                   <tr className="bg-gray-50">
                     <th className="border border-gray-200 px-3 py-2 text-left">Product Name</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Batch</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Quantity</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Buying Price</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Batch</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Selling Price</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Tally Selling Price</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Expiry Date</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Action</th>
                   </tr>
@@ -192,6 +210,13 @@ export default function BulkUploadModal({ isOpen, onClose, onApply, products }: 
                         <td className="border border-gray-200 px-2 py-1">
                           <input
                             className={inputClass}
+                            value={row.batch}
+                            onChange={(e) => updateRow(idx, 'batch', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
                             value={row.quantity}
                             onChange={(e) => updateRow(idx, 'quantity', e.target.value)}
                           />
@@ -206,8 +231,15 @@ export default function BulkUploadModal({ isOpen, onClose, onApply, products }: 
                         <td className="border border-gray-200 px-2 py-1">
                           <input
                             className={inputClass}
-                            value={row.batch}
-                            onChange={(e) => updateRow(idx, 'batch', e.target.value)}
+                            value={row.sellingPrice}
+                            onChange={(e) => updateRow(idx, 'sellingPrice', e.target.value)}
+                          />
+                        </td>
+                        <td className="border border-gray-200 px-2 py-1">
+                          <input
+                            className={inputClass}
+                            value={row.tallyPrice}
+                            onChange={(e) => updateRow(idx, 'tallyPrice', e.target.value)}
                           />
                         </td>
                         <td className="border border-gray-200 px-2 py-1">
