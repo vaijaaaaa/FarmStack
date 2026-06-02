@@ -25,3 +25,4 @@ farmstack.db-wal
 farmstack.db-shm
 
 *.md
+!README.md
