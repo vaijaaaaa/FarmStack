@@ -894,6 +894,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       }
     })
 
+    const toastId = toast.loading('Saving purchase…')
     try {
       const result: any = await createInvoice({
         supplier_id: selectedSupplier,
@@ -911,17 +912,18 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       setPurchaseItems([{ ...emptyPurchaseItem }])
       if (tallyStatus && result?.tally) {
         if (result.tally.status === 'synced') {
-          toast.success('Purchase saved and synced to Tally successfully!')
+          toast.success('Purchase saved and synced to Tally successfully!', { id: toastId })
         } else {
           toast.error(`Tally sync ${result.tally.status} — purchase saved locally`, {
+            id: toastId,
             description: result.tally.message,
           })
         }
       } else {
-        toast.success('Purchase Invoice saved successfully!')
+        toast.success('Purchase Invoice saved successfully!', { id: toastId })
       }
     } catch (err) {
-      toast.error(`Failed to save purchase: ${(err as Error).message}`)
+      toast.error(`Failed to save purchase: ${(err as Error).message}`, { id: toastId })
     }
   }
 

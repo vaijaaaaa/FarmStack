@@ -143,56 +143,50 @@ export default function AddSupplierPage({
       return
     }
 
-    try {
-      setLoading(true)
+    if (!editingSupplier) {
+      // Catch duplicate names within this form; duplicates already in the
+      // database are caught by the unique constraint (no extra fetch needed).
+      const dupErrors: Record<string, string[]> = {}
+      const seen = new Set<string>()
+      suppliers.forEach((supplier, index) => {
+        const key = supplier.name.trim().toLowerCase()
+        if (seen.has(key)) {
+          dupErrors[index.toString()] = ['Duplicate supplier name in this form']
+        } else {
+          seen.add(key)
+        }
+      })
+      if (Object.keys(dupErrors).length > 0) {
+        setErrors(dupErrors)
+        toast.error('Duplicate supplier name(s) found')
+        return
+      }
+    }
 
-      if (editingSupplier) {
-        // Update existing supplier
-        await supplierApi.update(editingSupplier.id, {
+    const action: Promise<unknown> = editingSupplier
+      ? supplierApi.update(editingSupplier.id, {
           ...suppliers[0],
           tally_ledger_name: suppliers[0].name,
         })
-        toast.success('Supplier updated successfully')
-      } else {
-        const dupErrors: Record<string, string[]> = {}
+      : Promise.all(
+          suppliers.map((supplier) =>
+            supplierApi.create({ ...supplier, tally_ledger_name: supplier.name }),
+          ),
+        )
 
-        const seen = new Set<string>()
-        suppliers.forEach((supplier, index) => {
-          const key = supplier.name.trim().toLowerCase()
-          if (seen.has(key)) {
-            dupErrors[index.toString()] = [...(dupErrors[index.toString()] || []), 'Duplicate supplier name in this form']
-          } else {
-            seen.add(key)
-          }
-        })
-
-        const existing = await supplierApi.list()
-        const existingNames = new Set(existing.map((s) => s.name.trim().toLowerCase()))
-        suppliers.forEach((supplier, index) => {
-          if (existingNames.has(supplier.name.trim().toLowerCase())) {
-            dupErrors[index.toString()] = [...(dupErrors[index.toString()] || []), 'A supplier with this name already exists']
-          }
-        })
-
-        if (Object.keys(dupErrors).length > 0) {
-          setErrors(dupErrors)
-          toast.error('Duplicate supplier name(s) found')
-          return
-        }
-
-        // Create multiple suppliers
-        for (const supplier of suppliers) {
-          await supplierApi.create({
-            ...supplier,
-            tally_ledger_name: supplier.name,
-          })
-        }
-        toast.success(`${suppliers.length} supplier(s) added successfully`)
-      }
-
+    setLoading(true)
+    toast.promise(action, {
+      loading: editingSupplier ? 'Updating supplier…' : 'Saving…',
+      success: editingSupplier
+        ? 'Supplier updated successfully'
+        : `${suppliers.length} supplier(s) added successfully`,
+      error: (err) => (err as Error).message,
+    })
+    try {
+      await action
       onSuccess()
-    } catch (err) {
-      toast.error((err as Error).message)
+    } catch {
+      // error toast already shown by toast.promise
     } finally {
       setLoading(false)
     }

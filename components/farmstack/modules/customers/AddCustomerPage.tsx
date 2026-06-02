@@ -144,52 +144,50 @@ export default function AddCustomerPage({
       return
     }
 
-    try {
-      setLoading(true)
-      if (editingCustomer) {
-        await customerApi.update(editingCustomer.id, {
+    if (!editingCustomer) {
+      // Catch duplicate names within this form; duplicates already in the
+      // database are caught by the unique constraint (no extra fetch needed).
+      const dupErrors: Record<string, string[]> = {}
+      const seen = new Set<string>()
+      customers.forEach((customer, index) => {
+        const key = customer.name.trim().toLowerCase()
+        if (seen.has(key)) {
+          dupErrors[index.toString()] = ['Duplicate customer name in this form']
+        } else {
+          seen.add(key)
+        }
+      })
+      if (Object.keys(dupErrors).length > 0) {
+        setErrors(dupErrors)
+        toast.error('Duplicate customer name(s) found')
+        return
+      }
+    }
+
+    const action: Promise<unknown> = editingCustomer
+      ? customerApi.update(editingCustomer.id, {
           ...customers[0],
           tally_ledger_name: customers[0].name,
         })
-        toast.success('Customer updated successfully')
-      } else {
-        const dupErrors: Record<string, string[]> = {}
+      : Promise.all(
+          customers.map((customer) =>
+            customerApi.create({ ...customer, tally_ledger_name: customer.name }),
+          ),
+        )
 
-        const seen = new Set<string>()
-        customers.forEach((customer, index) => {
-          const key = customer.name.trim().toLowerCase()
-          if (seen.has(key)) {
-            dupErrors[index.toString()] = [...(dupErrors[index.toString()] || []), 'Duplicate customer name in this form']
-          } else {
-            seen.add(key)
-          }
-        })
-
-        const existing = await customerApi.list()
-        const existingNames = new Set(existing.map((c) => c.name.trim().toLowerCase()))
-        customers.forEach((customer, index) => {
-          if (existingNames.has(customer.name.trim().toLowerCase())) {
-            dupErrors[index.toString()] = [...(dupErrors[index.toString()] || []), 'A customer with this name already exists']
-          }
-        })
-
-        if (Object.keys(dupErrors).length > 0) {
-          setErrors(dupErrors)
-          toast.error('Duplicate customer name(s) found')
-          return
-        }
-
-        for (const customer of customers) {
-          await customerApi.create({
-            ...customer,
-            tally_ledger_name: customer.name,
-          })
-        }
-        toast.success(`${customers.length} customer(s) added successfully`)
-      }
+    setLoading(true)
+    toast.promise(action, {
+      loading: editingCustomer ? 'Updating customer…' : 'Saving…',
+      success: editingCustomer
+        ? 'Customer updated successfully'
+        : `${customers.length} customer(s) added successfully`,
+      error: (err) => (err as Error).message,
+    })
+    try {
+      await action
       onSuccess()
-    } catch (err) {
-      toast.error((err as Error).message)
+    } catch {
+      // error toast already shown by toast.promise
     } finally {
       setLoading(false)
     }

@@ -610,6 +610,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   }
 
   const submit = async (payload: Record<string, unknown>) => {
+    const toastId = toast.loading('Saving sale…')
     try {
       const result: any = await createInvoice(payload as never)
       setShowNewInvoice(false)
@@ -621,17 +622,18 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       // Tally sync on; result.tally is present only when a sync was attempted.
       if (result?.tally) {
         if (result.tally.status === 'synced') {
-          toast.success('Sale saved and synced to Tally successfully!')
+          toast.success('Sale saved and synced to Tally successfully!', { id: toastId })
         } else {
           toast.error(`Tally sync ${result.tally.status} — sale saved locally`, {
+            id: toastId,
             description: result.tally.message,
           })
         }
       } else {
-        toast.success('Sale Invoice saved successfully!')
+        toast.success('Sale Invoice saved successfully!', { id: toastId })
       }
     } catch (err) {
-      toast.error(`Failed to save invoice: ${(err as Error).message}`)
+      toast.error(`Failed to save invoice: ${(err as Error).message}`, { id: toastId })
     }
   }
 

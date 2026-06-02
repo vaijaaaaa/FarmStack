@@ -276,36 +276,40 @@ export default function AddProductPage({
       toast.error('Please fix all errors before saving')
       return
     }
+    const payloadFor = (p: ProductFormData) => {
+      const name = toTitleCase(p.name.trim())
+      return {
+        name,
+        hsn_code: p.hsn_code.trim(),
+        product_type: p.product_type.trim(),
+        unit: p.unit,
+        gst_rate: Number(p.gst_rate || 0),
+        gst_supply_type: isExempted(p.gst_rate) ? '' : p.gst_supply_type,
+        selling_price: Number(p.selling_price || 0),
+        tally_price: Number(p.tally_price || 0),
+        expiry_date: p.expiry_date,
+        is_seed: p.is_seed,
+        tally_stock_item_name: name,
+      }
+    }
+
+    const action: Promise<unknown> = editingProduct
+      ? productApi.update(editingProduct.id, payloadFor(products[0]))
+      : Promise.all(products.map((product) => productApi.create(payloadFor(product))))
+
+    setLoading(true)
+    toast.promise(action, {
+      loading: editingProduct ? 'Updating product…' : 'Saving…',
+      success: editingProduct
+        ? 'Product updated successfully'
+        : `${products.length} product(s) added successfully`,
+      error: (err) => (err as Error).message,
+    })
     try {
-      setLoading(true)
-      const payloadFor = (p: ProductFormData) => {
-        const name = toTitleCase(p.name.trim())
-        return {
-          name,
-          hsn_code: p.hsn_code.trim(),
-          product_type: p.product_type.trim(),
-          unit: p.unit,
-          gst_rate: Number(p.gst_rate || 0),
-          gst_supply_type: isExempted(p.gst_rate) ? '' : p.gst_supply_type,
-          selling_price: Number(p.selling_price || 0),
-          tally_price: Number(p.tally_price || 0),
-          expiry_date: p.expiry_date,
-          is_seed: p.is_seed,
-          tally_stock_item_name: name,
-        }
-      }
-      if (editingProduct) {
-        await productApi.update(editingProduct.id, payloadFor(products[0]))
-        toast.success('Product updated successfully')
-      } else {
-        for (const product of products) {
-          await productApi.create(payloadFor(product))
-        }
-        toast.success(`${products.length} product(s) added successfully`)
-      }
+      await action
       onSuccess()
-    } catch (err) {
-      toast.error((err as Error).message)
+    } catch {
+      // error toast already shown by toast.promise
     } finally {
       setLoading(false)
     }
