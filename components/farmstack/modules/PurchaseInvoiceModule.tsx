@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronUp, Download, Filter, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import TallyStatusCell from '../components/TallyStatusCell'
+import BulkUploadModal, { type ParsedPurchaseRow } from './purchase/BulkUploadModal'
 
 // Today's date as YYYY-MM-DD (local time) for date inputs.
 const todayISO = () => {
@@ -135,6 +136,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const filterPanelRef = useRef<HTMLDivElement>(null)
   const filterButtonRef = useRef<HTMLButtonElement>(null)
   const [showAddTypeModal, setShowAddTypeModal] = useState(false)
+  const [showBulkModal, setShowBulkModal] = useState(false)
   const [currentTypeIndex, setCurrentTypeIndex] = useState<number | null>(null)
   const [newTypeName, setNewTypeName] = useState('')
   const [newTypeGST, setNewTypeGST] = useState('')
@@ -221,7 +223,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const isRowComplete = (it: PurchaseItem): boolean => {
     if (!it.selectedProduct) return false
     if (!(Number(it.quantity) > 0)) return false
-    if (!it.batch.trim()) return false
     if (it.buyingPrice.trim() === '') return false
     if (it.sellingPrice.trim() === '') return false
     if (it.tallyPrice.trim() === '') return false
@@ -572,44 +573,31 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     }
   }
 
-  const handleBulkUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
+  // Map the bulk-upload modal's parsed rows onto new-purchase form rows. Unit /
+  // Type / GST / Tally price come from the product master; the Buying Price
+  // falls back to the product's price when the row omits it.
+  const applyBulkRows = (rows: ParsedPurchaseRow[]) => {
+    const newItems: PurchaseItem[] = rows.map((r) => {
+      const product = mockProducts.find(
+        (p) => p.name.toLowerCase() === r.productName.trim().toLowerCase(),
+      )
+      const productPrice = product?.selling_price != null ? String(product.selling_price) : ''
+      return {
+        ...emptyPurchaseItem,
+        selectedProduct: product ? product.id : '',
+        quantity: r.quantity || '',
+        batch: r.batch || '',
+        buyingPrice: r.buyingPrice || productPrice,
+        sellingPrice: '',
+        tallyPrice: product?.tally_price != null ? String(product.tally_price) : '',
+        expiryDate: r.expiryDate || product?.expiry_date || '',
+        unit: product?.unit || '',
+        productType: product?.product_type || '',
+        gstRate: product?.gst_rate != null ? String(product.gst_rate) : '0',
+      }
+    })
 
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const csvStr = e.target?.result as string
-      const lines = csvStr.split(/\r\n|\n/).filter(line => line.trim() !== '')
-      if (lines.length <= 1) return
-      
-      // CSV columns: Product Name, Quantity, Buying Price, Batch, Expiry Date.
-      // Unit / Type / GST / Tally price come from the product master; the
-      // Buying Price falls back to the product's price when the CSV omits it.
-      const newItems: PurchaseItem[] = lines.slice(1).map((line) => {
-        const [productName, qty, price, batch, expDate] = line.split(',').map((s) => s?.trim())
-        const product = mockProducts.find(
-          (p) => p.name.toLowerCase() === productName?.toLowerCase(),
-        )
-        const productPrice = product?.selling_price != null ? String(product.selling_price) : ''
-        return {
-          ...emptyPurchaseItem,
-          selectedProduct: product ? product.id : '',
-          quantity: qty || '',
-          batch: batch || '',
-          buyingPrice: price || productPrice,
-          sellingPrice: '',
-          tallyPrice: product?.tally_price != null ? String(product.tally_price) : '',
-          expiryDate: expDate || product?.expiry_date || '',
-          unit: product?.unit || '',
-          productType: product?.product_type || '',
-          gstRate: product?.gst_rate != null ? String(product.gst_rate) : '0',
-        }
-      })
-
-      setPurchaseItems(newItems)
-    }
-    reader.readAsText(file)
-    event.target.value = ''
+    setPurchaseItems(newItems)
   }
 
   // Purchase history is invoice-level: group the flattened item rows by
@@ -742,8 +730,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         <td style="text-align:center">${it.batch || '—'}</td>
         <td style="text-align:center">${it.quantity}${it.unit ? ' ' + it.unit : ''}</td>
         <td style="text-align:right">₹${Number(it.buying_price || 0).toFixed(2)}</td>
-        <td style="text-align:right">₹${Number(it.selling_price || 0).toFixed(2)}</td>
-        <td style="text-align:right">₹${Number(it.tally_price || 0).toFixed(2)}</td>
+        <td style="text-align:center">${Number(it.tax || 0)}%</td>
         <td style="text-align:center">${it.expiry_date || '—'}</td>
         <td style="text-align:right">₹${Number(it.total_price || 0).toFixed(2)}</td>
       </tr>`).join('')
@@ -767,10 +754,10 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       <table>
         <thead><tr>
           <th>Product</th><th>Batch</th><th>Qty</th><th>Buying Price</th>
-          <th>Selling Price</th><th>Tally Selling Price</th><th>Expiry</th><th>Total</th>
+          <th>Tax</th><th>Expiry</th><th>Total</th>
         </tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><td colspan="7" style="text-align:right">Grand Total</td>
+        <tfoot><tr><td colspan="6" style="text-align:right">Grand Total</td>
         <td style="text-align:right">₹${group.total.toFixed(2)}</td></tr></tfoot>
       </table>
       </body></html>`)
@@ -838,10 +825,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       const qty = Number(String(item.quantity ?? '').trim())
       if (!Number.isFinite(qty) || qty <= 0) {
         toast.error(`${label}: Quantity is required and must be greater than 0.`)
-        return
-      }
-      if (!item.batch.trim()) {
-        toast.error(`${label}: Batch is required.`)
         return
       }
       const batchKey = item.batch.trim().toLowerCase()
@@ -1091,7 +1074,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 <thead className="bg-[#e0e0e0] text-gray-800 border-b border-gray-300">
                   <tr>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Product Name</th>
-                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Batch <span className="text-red-500">*</span></th>
+                    <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Batch</th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Quantity <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Buying Price <span className="text-red-500">*</span></th>
                     <th className="py-3 px-2 border-r border-gray-300 font-semibold whitespace-nowrap">Selling Price <span className="text-red-500">*</span></th>
@@ -1225,23 +1208,23 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                   Purchase
                 </button>
               </div>
-              <button 
-                onClick={() => document.getElementById('bulk-upload-input')?.click()}
+              <button
+                onClick={() => setShowBulkModal(true)}
                 className="bg-[#e4dd5f] hover:bg-[#d4cd4f] text-gray-900 font-medium px-6 py-2 rounded-lg text-lg"
               >
                 Bulk Upload
               </button>
-              <input 
-                type="file" 
-                id="bulk-upload-input" 
-                className="hidden" 
-                accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" 
-                onChange={handleBulkUpload}
-              />
             </div>
           </div>
         </div>
       )}
+
+      <BulkUploadModal
+        isOpen={showBulkModal}
+        onClose={() => setShowBulkModal(false)}
+        onApply={applyBulkRows}
+        products={mockProducts}
+      />
 
       {/* Add Type Modal */}
       {showAddTypeModal && (
