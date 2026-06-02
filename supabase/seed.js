@@ -14,19 +14,14 @@ const pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false 
 
 const now = (d) => new Date(d).toISOString()
 
-// Seeds, Fertilizers, Pesticide already exist in your DB — these add the two
-// missing ones; existing names are skipped via ON CONFLICT (name).
-const productTypes = [
-  { id: 'seed-pt-4', name: 'Irrigation', description: 'Drip and sprinkler equipment', tax: 12 },
-  { id: 'seed-pt-5', name: 'Tools', description: 'Farm tools and equipment', tax: 18 },
-]
+// Seeds, Fertilizers, Pesticide, Micronutrients already exist in the DB, so no
+// product types need seeding. (Irrigation/Tools were removed by request.)
+const productTypes = []
 
 const products = [
   { id: 'seed-prod-1', name: 'Hybrid Maize Seed', kannada_name: 'ಮೆಕ್ಕೆ ಜೋಳ ಬೀಜ', hsn_code: '1209', unit: 'BAG', product_type: 'Seeds', gst_rate: 5, selling_price: 1200, tally_price: 1200, is_seed: 1, location: 'Karnataka' },
   { id: 'seed-prod-2', name: 'Urea Fertilizer 50kg', kannada_name: 'ಯೂರಿಯಾ ಗೊಬ್ಬರ', hsn_code: '3102', unit: 'BAG', product_type: 'Fertilizers', gst_rate: 5, selling_price: 300, tally_price: 300, is_seed: 0, location: 'Karnataka' },
   { id: 'seed-prod-3', name: 'Glyphosate Pesticide 1L', kannada_name: 'ಕೀಟನಾಶಕ', hsn_code: '3808', unit: 'LTR', product_type: 'Pesticide', gst_rate: 18, selling_price: 450, tally_price: 450, is_seed: 0, location: 'Karnataka' },
-  { id: 'seed-prod-4', name: 'Drip Irrigation Pipe', kannada_name: 'ಹನಿ ನೀರಾವರಿ ಕೊಳವೆ', hsn_code: '3917', unit: 'MTR', product_type: 'Irrigation', gst_rate: 12, selling_price: 25, tally_price: 25, is_seed: 0, location: 'Karnataka' },
-  { id: 'seed-prod-5', name: 'Garden Sprayer 16L', kannada_name: 'ಸಿಂಪಡಿಸುವ ಯಂತ್ರ', hsn_code: '8424', unit: 'PCS', product_type: 'Tools', gst_rate: 18, selling_price: 850, tally_price: 850, is_seed: 0, location: 'Karnataka' },
 ]
 
 const suppliers = [
@@ -78,29 +73,35 @@ const tallyPriceOf = (productId) => Number(productById[productId]?.tally_price |
 
 async function main() {
   const client = await pool.connect()
+  // Ignore unique-violation (23505) so re-running on an existing/modified DB
+  // skips rows that already exist (by id OR name) instead of crashing.
+  const q = (sql, params) =>
+    client.query(sql, params).catch((e) => {
+      if (e.code !== '23505') throw e
+    })
   try {
     for (const pt of productTypes) {
-      await client.query(
+      await q(
         `INSERT INTO product_types (id,name,description,tax,created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (name) DO NOTHING`,
         [pt.id, pt.name, pt.description, pt.tax, now('2026-05-01')],
       )
     }
     for (const p of products) {
-      await client.query(
+      await q(
         `INSERT INTO products (id,name,kannada_name,hsn_code,unit,product_type,location,gst_rate,selling_price,tally_price,is_seed,created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (name) DO NOTHING`,
         [p.id, p.name, p.kannada_name, p.hsn_code, p.unit, p.product_type, p.location, p.gst_rate, p.selling_price, p.tally_price, p.is_seed, now('2026-05-01')],
       )
     }
     for (const s of suppliers) {
-      await client.query(
+      await q(
         `INSERT INTO suppliers (id,name,phone,address,state,country,gstin,place_of_supply,created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (name) DO NOTHING`,
         [s.id, s.name, s.phone, s.address, s.state, s.country, s.gstin, s.place_of_supply, now('2026-05-01')],
       )
     }
     for (const c of customers) {
-      await client.query(
+      await q(
         `INSERT INTO customers (id,name,kannada_name,phone,address,state,country,gstin,display_number,created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (name) DO NOTHING`,
         [c.id, c.name, c.kannada_name, c.phone, c.address, c.state, c.country, c.gstin, c.display_number, now('2026-05-01')],
@@ -108,14 +109,14 @@ async function main() {
     }
     for (const pv of purchases) {
       const total = pv.items.reduce((sum, it) => sum + it.quantity * it.buying_price * (1 + it.tax / 100), 0)
-      await client.query(
+      await q(
         `INSERT INTO purchase_invoices (id,supplier_id,supplier_name,supplier_invoice_number,purchase_date,total,status,created_at)
          VALUES ($1,$2,$3,$4,$5,$6,'saved',$7) ON CONFLICT (id) DO NOTHING`,
         [pv.id, pv.supplier_id, pv.supplier_name, pv.supplier_invoice_number, pv.purchase_date, total, now(pv.purchase_date)],
       )
       for (const it of pv.items) {
         const totalPrice = it.quantity * it.buying_price * (1 + it.tax / 100)
-        await client.query(
+        await q(
           `INSERT INTO purchase_items (id,invoice_id,product_id,product_name,quantity,buying_price,selling_price,tally_price,tax,total_price,type,unit)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (id) DO NOTHING`,
           [it.id, pv.id, it.product_id, it.product_name, it.quantity, it.buying_price, it.selling_price, tallyPriceOf(it.product_id), it.tax, totalPrice, ledger(it.product_id, 'Purchase'), it.unit],
@@ -124,13 +125,13 @@ async function main() {
     }
     for (const sv of sales) {
       const total = sv.items.reduce((sum, it) => sum + it.quantity * it.rate * (1 + it.gst / 100), 0)
-      await client.query(
+      await q(
         `INSERT INTO sales_invoices (id,invoice_number,customer_id,customer_name,tally_name,date,sale_type,total,status,created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'saved',$9) ON CONFLICT (id) DO NOTHING`,
         [sv.id, sv.invoice_number, sv.customer_id, sv.customer_name, sv.customer_name, sv.date, sv.sale_type, total, now(sv.date)],
       )
       for (const it of sv.items) {
-        await client.query(
+        await q(
           `INSERT INTO sales_items (id,invoice_id,product_id,quantity,rate,tally_price,gst,type,unit)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
           [it.id, sv.id, it.product_id, it.quantity, it.rate, tallyPriceOf(it.product_id) || it.rate, it.gst, ledger(it.product_id, 'Sales'), it.unit],
@@ -140,7 +141,7 @@ async function main() {
 
     const counts = {}
     for (const t of ['product_types', 'products', 'suppliers', 'customers', 'purchase_invoices', 'sales_invoices']) {
-      counts[t] = (await client.query(`SELECT count(*) FROM ${t}`)).rows[0].count
+      counts[t] = (await q(`SELECT count(*) FROM ${t}`)).rows[0].count
     }
     console.log('Seed complete. Row counts:', counts)
   } finally {
