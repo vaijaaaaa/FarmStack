@@ -46,6 +46,12 @@ const GST_SUPPLY_OPTIONS = [
 // GST Rate "0" means Exempted — no tax split, so GST Supply Type is N/A.
 const isExempted = (gstRate: string) => gstRate === '0'
 
+// Field/label styling shared with the Products creation page so the inline
+// "Add Product" modal looks identical to that form.
+const PRODUCT_FIELD_CLASS =
+  'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black'
+const PRODUCT_LABEL_CLASS = 'mb-1.5 block text-sm font-medium text-gray-700'
+
 // Map a product's category (the product master "product_type") to its Tally
 // purchase ledger — e.g. "Fertilizers" -> "Purchase of Fertilizers". This runs
 // only in the background; the category/ledger is never shown on the Purchase page.
@@ -152,20 +158,11 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     cPriceTo: '',
   })
   
-  // Fallback product-type list for the "Add Product" modal dropdown.
-  const productTypes = [
-    { id: 'fertilizer', name: 'Purchase of Fertilizer', tax: 5 },
-    { id: 'micronutrients', name: 'Purchase of Micronutrients', tax: 12 },
-    { id: 'pesticide', name: 'Purchase of Pesticide', tax: 18 },
-    { id: 'seeds', name: 'Purchase of Seeds', tax: 0 },
-  ]
-  const adminPurchaseTypes = adminProductTypes.filter((type) => type.name.toLowerCase().startsWith('purchase'))
-  const availableProductTypes = [
-    ...adminPurchaseTypes,
-    ...productTypes.filter(
-      (type) => !adminPurchaseTypes.some((adminType) => adminType.name.toLowerCase() === type.name.toLowerCase()),
-    ),
-  ]
+  // Product types for the inline "Add Product" modal — the SAME plain list the
+  // Products page uses (e.g. "Fertilizers"). "Purchase of ..." is only the Tally
+  // ledger, derived at sync time via toPurchaseLedger() — never the product_type,
+  // so master data stays consistent across modules.
+  const availableProductTypes = adminProductTypes
 
   const productLocations = Array.from(
     new Set(mockProducts.map((product) => product.location?.trim()).filter(Boolean) as string[]),
@@ -426,16 +423,15 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       return
     }
     try {
-      const normalizedTypeName = typeName.toLowerCase().startsWith('purchase')
-        ? typeName
-        : `Purchase of ${typeName}`
+      // Store the plain category (e.g. "Fertilizer"), consistent with the
+      // Products page. The "Purchase of ..." ledger is derived later, not here.
       const existingType = availableProductTypes.find(
-        (type) => type.name.toLowerCase() === normalizedTypeName.toLowerCase(),
+        (type) => type.name.toLowerCase() === typeName.toLowerCase(),
       )
       const typeToSelect =
         existingType ||
         (await createProductType({
-          name: normalizedTypeName,
+          name: typeName,
           description: 'Added from Purchase Invoice',
           tax: Number(newTypeGST) || 0,
         }))
@@ -1255,55 +1251,42 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
 
       {/* Add Type Modal */}
       {showAddTypeModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20">
-          <div className="bg-white p-6 rounded-lg min-w-96 border border-gray-300">
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="text-xl font-bold text-black">Add Purchase Type</h3>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white border border-gray-200">
+            <div className="flex justify-between items-center border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-black">Add Product Type</h3>
               <button
                 onClick={closeAddTypeModal}
-                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
+                className="text-gray-400 hover:text-gray-700 font-bold text-2xl leading-none"
               >
                 &times;
               </button>
             </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">Type Name</label>
-                <input
-                  type="text"
-                  value={newTypeName}
-                  onChange={(e) => setNewTypeName(e.target.value)}
-                  placeholder="e.g., Purchase of Spices"
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                  autoFocus
-                />
-              </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">GST Percentage (%)</label>
-                <input
-                  type="number"
-                  value={newTypeGST}
-                  onChange={(e) => setNewTypeGST(e.target.value)}
-                  placeholder="e.g., 5, 12, 18"
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                  min="0"
-                  max="100"
-                />
-              </div>
-              <div className="flex justify-center gap-4 mt-2">
-                <button
-                  onClick={closeAddTypeModal}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveType}
-                  className="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-2 rounded-lg"
-                >
-                  Add Type
-                </button>
-              </div>
+            <div className="px-6 py-5">
+              <label className={PRODUCT_LABEL_CLASS}>Type Name</label>
+              <input
+                type="text"
+                value={newTypeName}
+                onChange={(e) => setNewTypeName(e.target.value)}
+                placeholder="e.g., Fertilizer"
+                className={PRODUCT_FIELD_CLASS}
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4">
+              <Button
+                onClick={closeAddTypeModal}
+                variant="ghost"
+                className="text-gray-600 hover:bg-gray-100 hover:text-black"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveType}
+                className="bg-black text-white hover:bg-gray-900"
+              >
+                Add Type
+              </Button>
             </div>
           </div>
         </div>
@@ -1586,77 +1569,99 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
 
       {/* Add Product Modal */}
       {showAddProductModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
-          <div className="bg-white p-8 rounded-lg w-[480px] max-h-[90vh] overflow-auto border border-gray-300">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-black">Add Product</h3>
-              <button 
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
+          <div className="bg-white rounded-xl w-full max-w-3xl max-h-[90vh] overflow-auto border border-gray-200">
+            {/* Header */}
+            <div className="flex justify-between items-center border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-black">Add Product</h3>
+              <button
                 onClick={closeAddProductModal}
-                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
+                className="text-gray-400 hover:text-gray-700 font-bold text-2xl leading-none"
               >
                 &times;
               </button>
             </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">Product Name</label>
-                <input
-                  type="text"
-                  placeholder="Product Name"
-                  value={newProduct.name}
-                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                  autoFocus
-                />
-              </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">HSN Code</label>
-                <input
-                  type="text"
-                  placeholder="HSN Code"
-                  value={newProduct.hsn_code}
-                  onChange={(e) => setNewProduct({ ...newProduct, hsn_code: e.target.value })}
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                />
-              </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">Product Type</label>
-                <select
-                  value={newProduct.product_type}
-                  onChange={(e) =>
-                    e.target.value === 'add-type'
-                      ? (setCurrentTypeIndex(-1), setNewTypeName(''), setNewTypeGST(''), setShowAddTypeModal(true))
-                      : setNewProduct({ ...newProduct, product_type: e.target.value })
-                  }
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                >
-                  {availableProductTypes.map((type) => (
-                    <option key={type.id} value={type.name}>{type.name}</option>
-                  ))}
-                  <option value="add-type" className="text-green-600 font-semibold">+ Add Product Type</option>
-                </select>
-              </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">Unit</label>
-                <select
-                  value={newProduct.unit}
-                  onChange={(e) =>
-                    e.target.value === '__add_unit__'
-                      ? openAddValue('unit')
-                      : setNewProduct({ ...newProduct, unit: e.target.value })
-                  }
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                >
-                  <option value="">Select a unit</option>
-                  {unitOptions.map((u) => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                  <option value="__add_unit__" className="text-green-600 font-semibold">+ Add Unit</option>
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex-1 flex flex-col">
-                  <label className="text-gray-700 font-medium mb-1 text-sm">GST Rate</label>
+
+            {/* Body — horizontal form matching the Products creation page */}
+            <div className="px-6 py-5">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                {/* Product Name */}
+                <div>
+                  <label className={PRODUCT_LABEL_CLASS}>
+                    Product Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Urea Fertilizer"
+                    value={newProduct.name}
+                    onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                    className={PRODUCT_FIELD_CLASS}
+                    autoFocus
+                  />
+                </div>
+
+                {/* HSN Code */}
+                <div>
+                  <label className={PRODUCT_LABEL_CLASS}>
+                    HSN Code <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter HSN code"
+                    value={newProduct.hsn_code}
+                    onChange={(e) => setNewProduct({ ...newProduct, hsn_code: e.target.value })}
+                    className={PRODUCT_FIELD_CLASS}
+                  />
+                </div>
+
+                {/* Product Type */}
+                <div>
+                  <label className={PRODUCT_LABEL_CLASS}>
+                    Product Type <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={newProduct.product_type}
+                    onChange={(e) =>
+                      e.target.value === 'add-type'
+                        ? (setCurrentTypeIndex(-1), setNewTypeName(''), setNewTypeGST(''), setShowAddTypeModal(true))
+                        : setNewProduct({ ...newProduct, product_type: e.target.value })
+                    }
+                    className={`${PRODUCT_FIELD_CLASS} bg-white`}
+                  >
+                    {availableProductTypes.map((type) => (
+                      <option key={type.id} value={type.name}>{type.name}</option>
+                    ))}
+                    <option value="add-type" className="text-green-600 font-semibold">+ Add Product Type</option>
+                  </select>
+                </div>
+
+                {/* Unit */}
+                <div>
+                  <label className={PRODUCT_LABEL_CLASS}>
+                    Unit <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={newProduct.unit}
+                    onChange={(e) =>
+                      e.target.value === '__add_unit__'
+                        ? openAddValue('unit')
+                        : setNewProduct({ ...newProduct, unit: e.target.value })
+                    }
+                    className={`${PRODUCT_FIELD_CLASS} bg-white`}
+                  >
+                    <option value="">Select a unit</option>
+                    {unitOptions.map((u) => (
+                      <option key={u} value={u}>{u}</option>
+                    ))}
+                    <option value="__add_unit__" className="text-green-600 font-semibold">+ Add Unit</option>
+                  </select>
+                </div>
+
+                {/* GST Rate */}
+                <div>
+                  <label className={PRODUCT_LABEL_CLASS}>
+                    GST Rate <span className="text-red-500">*</span>
+                  </label>
                   <select
                     value={newProduct.gst_rate}
                     onChange={(e) =>
@@ -1664,7 +1669,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                         ? openAddValue('gst')
                         : setNewProduct({ ...newProduct, gst_rate: e.target.value })
                     }
-                    className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                    className={`${PRODUCT_FIELD_CLASS} bg-white`}
                   >
                     <option value="">Select GST rate</option>
                     {gstRateOptions.map((o) => (
@@ -1673,20 +1678,25 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                     <option value="__add_gst__" className="text-green-600 font-semibold">+ Add GST Rate</option>
                   </select>
                 </div>
-                <div className="flex-1 flex flex-col">
-                  <label className="text-gray-700 font-medium mb-1 text-sm">GST Supply Type</label>
+
+                {/* GST Supply Type */}
+                <div>
+                  <label className={PRODUCT_LABEL_CLASS}>
+                    GST Supply Type{' '}
+                    {!isExempted(newProduct.gst_rate) && <span className="text-red-500">*</span>}
+                  </label>
                   {isExempted(newProduct.gst_rate) ? (
                     <input
                       type="text"
                       value="Not Applicable (Exempted)"
                       disabled
-                      className="border border-gray-400 rounded p-2 bg-gray-100 text-gray-500 focus:outline-none"
+                      className={`${PRODUCT_FIELD_CLASS} bg-gray-100 text-gray-500`}
                     />
                   ) : (
                     <select
                       value={newProduct.gst_supply_type}
                       onChange={(e) => setNewProduct({ ...newProduct, gst_supply_type: e.target.value })}
-                      className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                      className={`${PRODUCT_FIELD_CLASS} bg-white`}
                     >
                       {GST_SUPPLY_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>{o.label}</option>
@@ -1694,66 +1704,82 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                     </select>
                   )}
                 </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex-1 flex flex-col">
-                  <label className="text-gray-700 font-medium mb-1 text-sm">Selling Price</label>
+
+                {/* Selling Price */}
+                <div>
+                  <label className={PRODUCT_LABEL_CLASS}>
+                    Selling Price <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="number"
                     placeholder="0"
+                    min="0"
                     value={newProduct.selling_price}
                     onChange={(e) => setNewProduct({ ...newProduct, selling_price: e.target.value })}
-                    className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                    className={PRODUCT_FIELD_CLASS}
                   />
                 </div>
-                <div className="flex-1 flex flex-col">
-                  <label className="text-gray-700 font-medium mb-1 text-sm">Tally Price</label>
+
+                {/* Tally Price */}
+                <div>
+                  <label className={PRODUCT_LABEL_CLASS}>
+                    Tally Price <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="number"
                     placeholder="0"
+                    min="0"
                     value={newProduct.tally_price}
                     onChange={(e) => setNewProduct({ ...newProduct, tally_price: e.target.value })}
-                    className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
+                    className={PRODUCT_FIELD_CLASS}
                   />
                 </div>
+
+                {/* Expiry Date */}
+                <div>
+                  <label className={PRODUCT_LABEL_CLASS}>
+                    Expiry Date{newProduct.is_seed && <span className="text-red-500"> *</span>}
+                  </label>
+                  <input
+                    type="date"
+                    value={newProduct.expiry_date}
+                    onChange={(e) => setNewProduct({ ...newProduct, expiry_date: e.target.value })}
+                    className={PRODUCT_FIELD_CLASS}
+                  />
+                </div>
+
+                {/* Seed */}
+                <div className="flex items-end">
+                  <label className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={newProduct.is_seed}
+                      onChange={(e) => setNewProduct({ ...newProduct, is_seed: e.target.checked })}
+                      className="h-4 w-4 accent-black"
+                    />
+                    <span className="text-sm font-medium text-gray-700">This is a Seed</span>
+                  </label>
+                </div>
               </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">
-                  Expiry Date{newProduct.is_seed && <span className="text-red-500"> *</span>}
-                </label>
-                <input
-                  type="date"
-                  value={newProduct.expiry_date}
-                  onChange={(e) => setNewProduct({ ...newProduct, expiry_date: e.target.value })}
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                />
-              </div>
-              <label className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-400 px-3 py-2">
-                <input
-                  type="checkbox"
-                  checked={newProduct.is_seed}
-                  onChange={(e) => setNewProduct({ ...newProduct, is_seed: e.target.checked })}
-                  className="h-4 w-4 accent-black"
-                />
-                <span className="text-sm font-medium text-gray-700">This is a Seed</span>
-              </label>
-              {addProductError && (
-                <p className="text-sm text-red-600">{addProductError}</p>
-              )}
-              <div className="flex justify-center gap-4 mt-4">
-                <button
-                  onClick={closeAddProductModal}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={handleAddProduct}
-                  className="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-2 rounded-lg"
-                >
-                  Add Product
-                </button>
-              </div>
+
+              {addProductError && <p className="mt-3 text-sm text-red-600">{addProductError}</p>}
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4">
+              <Button
+                onClick={closeAddProductModal}
+                variant="ghost"
+                className="text-gray-600 hover:bg-gray-100 hover:text-black"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddProduct}
+                className="bg-black text-white hover:bg-gray-900"
+              >
+                Add Product
+              </Button>
             </div>
           </div>
         </div>
@@ -1761,48 +1787,47 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
 
       {/* Add Unit / Add GST Rate Modal */}
       {addValue && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20">
-          <div className="bg-white p-6 rounded-lg min-w-80 border border-gray-300">
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="text-xl font-bold text-black">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/20 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white border border-gray-200">
+            <div className="flex justify-between items-center border-b border-gray-200 px-6 py-4">
+              <h3 className="text-lg font-bold text-black">
                 {addValue.kind === 'unit' ? 'Add Unit' : 'Add GST Rate'}
               </h3>
               <button
                 onClick={closeAddValue}
-                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
+                className="text-gray-400 hover:text-gray-700 font-bold text-2xl leading-none"
               >
                 &times;
               </button>
             </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium mb-1 text-sm">
-                  {addValue.kind === 'unit' ? 'Unit name' : 'GST rate (%)'}
-                </label>
-                <input
-                  type={addValue.kind === 'unit' ? 'text' : 'number'}
-                  value={addValueInput}
-                  onChange={(e) => setAddValueInput(e.target.value)}
-                  placeholder={addValue.kind === 'unit' ? 'e.g. Tonne' : 'e.g. 12'}
-                  autoFocus
-                  className="border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none"
-                />
-              </div>
-              {addValueError && <p className="text-sm text-red-600">{addValueError}</p>}
-              <div className="flex justify-center gap-4 mt-2">
-                <button
-                  onClick={closeAddValue}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveAddValue}
-                  className="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-2 rounded-lg"
-                >
-                  Add
-                </button>
-              </div>
+            <div className="px-6 py-5">
+              <label className={PRODUCT_LABEL_CLASS}>
+                {addValue.kind === 'unit' ? 'Unit Name' : 'GST Rate (%)'}
+              </label>
+              <input
+                type={addValue.kind === 'unit' ? 'text' : 'number'}
+                value={addValueInput}
+                onChange={(e) => setAddValueInput(e.target.value)}
+                placeholder={addValue.kind === 'unit' ? 'e.g. Tonne' : 'e.g. 12'}
+                autoFocus
+                className={PRODUCT_FIELD_CLASS}
+              />
+              {addValueError && <p className="mt-2 text-sm text-red-600">{addValueError}</p>}
+            </div>
+            <div className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4">
+              <Button
+                onClick={closeAddValue}
+                variant="ghost"
+                className="text-gray-600 hover:bg-gray-100 hover:text-black"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveAddValue}
+                className="bg-black text-white hover:bg-gray-900"
+              >
+                Add
+              </Button>
             </div>
           </div>
         </div>
