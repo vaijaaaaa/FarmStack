@@ -104,6 +104,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState('')
   const [purchaseDate, setPurchaseDate] = useState(todayISO)
   const [tallyStatus, setTallyStatus] = useState(false)
+  const [isSavingPurchase, setIsSavingPurchase] = useState(false)
 
   // Multi-item rows State
   const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>([{ ...emptyPurchaseItem }])
@@ -795,6 +796,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   }
 
   const handleSavePurchase = async () => {
+    if (isSavingPurchase) return
     if (!selectedSupplier) {
       toast.error('Please select a supplier')
       return
@@ -895,6 +897,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     })
 
     const toastId = toast.loading('Saving purchase…')
+    setIsSavingPurchase(true)
     try {
       const result: any = await createInvoice({
         supplier_id: selectedSupplier,
@@ -924,6 +927,8 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       }
     } catch (err) {
       toast.error(`Failed to save purchase: ${(err as Error).message}`, { id: toastId })
+    } finally {
+      setIsSavingPurchase(false)
     }
   }
 
@@ -1205,9 +1210,12 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 <button
                   onClick={handleSavePurchase}
                   data-kbd-submit
-                  className="bg-[#6b66fc] hover:bg-[#5b56dc] text-white font-medium px-8 py-2 rounded-lg text-lg min-w-30"
+                  disabled={isSavingPurchase}
+                  className={`bg-[#6b66fc] text-white font-medium px-8 py-2 rounded-lg text-lg min-w-30 transition-colors ${
+                    isSavingPurchase ? 'opacity-60 cursor-not-allowed' : 'hover:bg-[#5b56dc]'
+                  }`}
                 >
-                  Purchase
+                  {isSavingPurchase ? 'Saving...' : 'Purchase'}
                 </button>
               </div>
               <button
