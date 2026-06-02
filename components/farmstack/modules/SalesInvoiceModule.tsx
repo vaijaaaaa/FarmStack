@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronUp, Download, Filter, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import TallyStatusCell from '../components/TallyStatusCell'
+import SalesBulkUploadModal, { type ParsedSalesRow } from './sales/BulkUploadModal'
 
 // Today's date as YYYY-MM-DD (local time) for date inputs.
 const todayISO = () => {
@@ -128,6 +129,25 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const [customerErrors, setCustomerErrors] = useState<string[]>([])
   const [date, setDate] = useState(todayISO)
   const [saleLines, setSaleLines] = useState<SaleLine[]>([createEmptyLine()])
+  const [showBulkModal, setShowBulkModal] = useState(false)
+
+  // Map bulk-uploaded CSV rows onto the new-sale form. Selling price falls back
+  // to the product master; tally price / unit / GST are derived at save time.
+  const applyBulkRows = (rows: ParsedSalesRow[]) => {
+    const newLines: SaleLine[] = rows.map((r) => {
+      const product = mockProducts.find(
+        (p) => p.name.toLowerCase() === r.productName.trim().toLowerCase(),
+      )
+      const productPrice = product?.selling_price != null ? String(product.selling_price) : ''
+      return {
+        selectedProduct: product ? product.id : '',
+        quantity: r.quantity || '',
+        sellingPrice: r.sellingPrice || productPrice,
+        expiryDate: r.expiryDate || (product?.expiry_date ? String(product.expiry_date) : ''),
+      }
+    })
+    setSaleLines(newLines.length > 0 ? newLines : [createEmptyLine()])
+  }
 
   // Additional details modal states (for invoices > 50k)
   const [showAdditionalDetailsModal, setShowAdditionalDetailsModal] = useState(false)
@@ -933,24 +953,40 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               </table>
             </div>
 
-            <div className="flex items-center justify-center gap-6 mt-8 pb-4">
+            <div className="flex items-center justify-between gap-6 mt-8 pb-4">
+              <div></div>
+              <div className="flex gap-6">
+                <button
+                  onClick={() => setShowNewInvoice(false)}
+                  className="bg-[#d4d4d4] hover:bg-[#c4c4c4] text-gray-800 font-medium px-8 py-2 rounded-lg text-lg min-w-30"
+                >
+                  cancel
+                </button>
+                <button
+                  onClick={handleSaveInvoice}
+                  data-kbd-submit
+                  className="bg-[#6b66fc] hover:bg-[#5b56dc] text-white font-medium px-8 py-2 rounded-lg text-lg min-w-30"
+                >
+                  Sale
+                </button>
+              </div>
               <button
-                onClick={() => setShowNewInvoice(false)}
-                className="bg-[#d4d4d4] hover:bg-[#c4c4c4] text-gray-800 font-medium px-8 py-2 rounded-lg text-lg min-w-30"
+                onClick={() => setShowBulkModal(true)}
+                className="bg-[#e4dd5f] hover:bg-[#d4cd4f] text-gray-900 font-medium px-6 py-2 rounded-lg text-lg"
               >
-                cancel
-              </button>
-              <button
-                onClick={handleSaveInvoice}
-                data-kbd-submit
-                className="bg-[#6b66fc] hover:bg-[#5b56dc] text-white font-medium px-8 py-2 rounded-lg text-lg min-w-30"
-              >
-                Sale
+                Bulk Upload
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <SalesBulkUploadModal
+        isOpen={showBulkModal}
+        onClose={() => setShowBulkModal(false)}
+        onApply={applyBulkRows}
+        products={mockProducts}
+      />
 
       {/* Add Customer Modal */}
       {showAddCustomerModal && (
