@@ -64,7 +64,7 @@ export default function AppLayout() {
 
     switch (currentPage) {
       case 'dashboard':
-        return <Dashboard {...commonProps} role={role} onRoleChange={handleRoleChange} />
+        return <Dashboard {...commonProps} />
       case 'customers':
         return <CustomersModule {...commonProps} />
       case 'suppliers':
@@ -90,14 +90,14 @@ export default function AppLayout() {
       case 'entries':
         return <EntriesModule {...commonProps} />
       default:
-        return <Dashboard {...commonProps} role={role} onRoleChange={handleRoleChange} />
+        return <Dashboard {...commonProps} />
     }
   }
 
   return (
     <div className="flex h-screen bg-white">
       <FormKeyboardNav />
-      <Sidebar currentPage={currentPage} onPageChange={handlePageChange} language={language} role={role} />
+      <Sidebar currentPage={currentPage} onPageChange={handlePageChange} language={language} role={role} onRoleChange={handleRoleChange} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header pageTitle={getPageTitle()} language={language} onLanguageChange={handleLanguageChange} />
         <main className="flex-1 overflow-auto bg-gray-50">

@@ -8,6 +8,7 @@ interface SidebarProps {
   onPageChange: (page: Page) => void
   language: Language
   role: UserRole
+  onRoleChange: (role: UserRole) => void
 }
 
 const userMenuItems: { id: Page; key: string }[] = [
@@ -33,7 +34,7 @@ const adminMenuItems: { id: Page; key: string }[] = [
   { id: 'entries', key: 'entries' },
 ]
 
-export default function Sidebar({ currentPage, onPageChange, language, role }: SidebarProps) {
+export default function Sidebar({ currentPage, onPageChange, language, role, onRoleChange }: SidebarProps) {
   const t = (key: string) => getTranslation(language, key)
 
   const handleNavigation = (page: Page) => {
@@ -48,9 +49,30 @@ export default function Sidebar({ currentPage, onPageChange, language, role }: S
         <div className="border-b border-gray-200 p-6">
           <h2 className="text-xl font-bold text-black">FarmStack</h2>
           <p className="mt-1 text-xs text-gray-500">Farm Management</p>
-          <p className="mt-2 rounded bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 inline-block">
-            {role === 'admin' ? 'Admin' : 'User'}
-          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={() => onRoleChange('user')}
+              type="button"
+              className={`flex-1 rounded px-3 py-1.5 text-xs font-semibold transition-all ${
+                role === 'user'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              User
+            </button>
+            <button
+              onClick={() => onRoleChange('admin')}
+              type="button"
+              className={`flex-1 rounded px-3 py-1.5 text-xs font-semibold transition-all ${
+                role === 'admin'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Admin
+            </button>
+          </div>
         </div>
 
         <nav className="flex-1 space-y-0 overflow-y-auto p-4">

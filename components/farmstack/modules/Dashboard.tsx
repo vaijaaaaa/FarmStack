@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Language, UserRole } from '@/types/farmstack'
+import { Language } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 import StatCard from '../components/StatCard'
 import DataTable from '../components/DataTable'
@@ -22,11 +22,9 @@ import {
 
 interface DashboardProps {
   language: Language
-  role: UserRole
-  onRoleChange: (role: UserRole) => void
 }
 
-export default function Dashboard({ language, role, onRoleChange }: DashboardProps) {
+export default function Dashboard({ language }: DashboardProps) {
   const t = (key: string) => getTranslation(language, key)
   const [selectedView, setSelectedView] = useState<string>('sales')
 
@@ -243,28 +241,8 @@ export default function Dashboard({ language, role, onRoleChange }: DashboardPro
   return (
     <div className="space-y-8">
       <div>
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4">
           <h2 className="text-2xl font-bold text-black">{t('dashboard')}</h2>
-          <div className="inline-flex rounded-lg border border-gray-300 bg-white p-1">
-            <button
-              type="button"
-              onClick={() => onRoleChange('user')}
-              className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                role === 'user' ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              User
-            </button>
-            <button
-              type="button"
-              onClick={() => onRoleChange('admin')}
-              className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-                role === 'admin' ? 'bg-black text-white' : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              Admin
-            </button>
-          </div>
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
           {stats.map((stat, idx) => (
