@@ -524,6 +524,23 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     setSupplierSearchPerformed(true)
   }
 
+  // Auto-search: whenever any filter field changes, run the search automatically
+  // after a short debounce — no need to click the Search button. The button and
+  // Enter key still work as before. A ref keeps the effect on the latest handler.
+  const supplierSearchRef = useRef(handleSupplierSearch)
+  supplierSearchRef.current = handleSupplierSearch
+  useEffect(() => {
+    if (!showSearchSupplierDialog) return
+    const hasInput = Object.values(supplierSearchForm).some((v) => v.trim() !== '')
+    if (!hasInput) {
+      setSupplierSearchResults([])
+      setSupplierSearchPerformed(false)
+      return
+    }
+    const timer = setTimeout(() => supplierSearchRef.current(), 350)
+    return () => clearTimeout(timer)
+  }, [supplierSearchForm, showSearchSupplierDialog])
+
   const clearSupplierSearch = () => {
     setSupplierSearchForm({ startsWith: '', contains: '', endsWith: '', state: '', gstin: '' })
     setSupplierSearchResults([])
