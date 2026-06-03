@@ -10,6 +10,9 @@ interface TallySyncModuleProps {
   language: Language
 }
 
+// Command the client runs on the Tally PC to start a Cloudflare tunnel.
+const TUNNEL_CMD = 'cloudflared tunnel --url http://localhost:9000'
+
 export default function TallySyncModule({ language }: TallySyncModuleProps) {
   const t = (key: string) => getTranslation(language, key)
   const [syncLogs] = useState(mockSyncLogs)
@@ -51,6 +54,22 @@ export default function TallySyncModule({ language }: TallySyncModuleProps) {
         : 'Cleared — using default (this computer’s localhost:9000)',
     )
     checkConnection()
+  }
+
+  const handleClearUrl = () => {
+    setTallyUrl('')
+    localStorage.removeItem(TALLY_URL_STORAGE_KEY)
+    toast.success('Cleared — using this computer’s Tally (localhost:9000)')
+    checkConnection()
+  }
+
+  const copyTunnelCmd = async () => {
+    try {
+      await navigator.clipboard.writeText(TUNNEL_CMD)
+      toast.success('Command copied — paste it into Command Prompt')
+    } catch {
+      toast.error('Could not copy. Select the command and copy it manually.')
+    }
   }
 
   const dot =
@@ -113,8 +132,11 @@ export default function TallySyncModule({ language }: TallySyncModuleProps) {
             <Button onClick={handleSaveUrl} className="bg-black text-white hover:bg-gray-900">
               Save
             </Button>
-            <Button onClick={() => checkConnection()} variant="outline">
+            <Button onClick={() => checkConnection()} variant="outline" className="shadow-none">
               Test Connection
+            </Button>
+            <Button onClick={handleClearUrl} variant="outline" className="shadow-none">
+              Clear
             </Button>
           </div>
           <p className="mt-2 text-xs text-gray-500">
@@ -131,6 +153,22 @@ export default function TallySyncModule({ language }: TallySyncModuleProps) {
               {conn.message}
             </p>
           )}
+
+          {/* Copyable tunnel command for cloud / Vercel users. */}
+          <div className="mt-4">
+            <p className="mb-1.5 text-xs text-gray-500">
+              Using the cloud site? Run this on the Tally PC (Command Prompt), then paste the link
+              it gives into the box above and click Save:
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 overflow-x-auto whitespace-nowrap rounded border border-gray-200 px-3 py-2 font-mono text-xs text-gray-800">
+                {TUNNEL_CMD}
+              </code>
+              <Button type="button" variant="outline" onClick={copyTunnelCmd} className="shadow-none">
+                Copy
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
 
