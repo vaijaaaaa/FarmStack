@@ -920,6 +920,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       })
       setShowNewInvoice(false)
       setSelectedSupplier('')
+      setSupplierSearch('')
       setSupplierInvoiceNumber('')
       setPurchaseDate(todayISO())
       setTallyStatus(false)
@@ -955,7 +956,18 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         <h2 className="text-2xl font-bold text-black">{t('purchase_invoice')}</h2>
         <div className="flex items-center gap-3">
           <Button
-            onClick={() => setShowNewInvoice(!showNewInvoice)}
+            onClick={() => {
+              // Opening a fresh form — clear any leftover state from the last purchase.
+              if (!showNewInvoice) {
+                setSelectedSupplier('')
+                setSupplierSearch('')
+                setSupplierInvoiceNumber('')
+                setPurchaseDate(todayISO())
+                setTallyStatus(false)
+                setPurchaseItems([{ ...emptyPurchaseItem }])
+              }
+              setShowNewInvoice(!showNewInvoice)
+            }}
             className="bg-black text-white hover:bg-gray-900"
           >
             {showNewInvoice ? 'Cancel' : 'Create Purchase'}
