@@ -483,21 +483,27 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   }
 
   const handleProductSelect = (index: number, productId: string) => {
-    if (productId && availableStock(productId) <= 0) {
-      toast.error('No stock available for this product. Please add purchase stock first.')
-      return
-    }
     // Auto-fill selling price & expiry from the LATEST purchase of this product
-    // — the most recent purchase price always overrides older ones.
+    // — the most recent purchase price always overrides older ones. Expiry falls
+    // back to the product master's expiry date when the purchase has none.
     const latest = latestPurchaseForProduct(productId)
+    const product = mockProducts.find((p) => p.id === productId)
+    const expiry = latest?.expiry_date || product?.expiry_date || ''
     const updated = [...saleLines]
     updated[index] = {
       ...updated[index],
       selectedProduct: productId,
       sellingPrice: latest?.selling_price != null ? String(latest.selling_price) : '',
-      expiryDate: latest?.expiry_date ? String(latest.expiry_date) : '',
+      expiryDate: expiry ? String(expiry) : '',
     }
     setSaleLines(updated)
+    // The product is still selectable when out of stock — we just warn here. The
+    // sale itself is blocked at save time until stock is added via a Purchase.
+    if (productId && availableStock(productId) <= 0) {
+      toast.warning(`${product?.name || 'This product'} is out of stock`, {
+        description: 'Add stock through a Purchase before you can sell it.',
+      })
+    }
   }
 
   // A line is "complete" when its required fields are filled. Expiry is only
