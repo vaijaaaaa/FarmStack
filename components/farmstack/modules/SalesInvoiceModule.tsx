@@ -1564,10 +1564,11 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                 return (
                   <Fragment key={inv.id}>
                     <tr
+                      tabIndex={0}
                       onClick={() =>
                         setExpandedSaleId(expandedSaleId === String(inv.id) ? null : String(inv.id))
                       }
-                      className="cursor-pointer border-b border-gray-100 hover:bg-gray-50"
+                      className="cursor-pointer border-b border-gray-100 hover:bg-gray-50 focus:bg-blue-50 focus:outline-none"
                     >
                       <td className="px-4 py-3 text-sm text-gray-900">
                         {inv.customer_name || customer?.name || 'N/A'}

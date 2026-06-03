@@ -1,3 +1,6 @@
+'use client'
+
+import { useRef } from 'react'
 import { Language, UserRole } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 
@@ -41,6 +44,22 @@ export default function Sidebar({ currentPage, onPageChange, language, role, onR
     onPageChange(page)
   }
 
+  // ↑/↓ move focus between sidebar items (wrapping); Enter opens the focused
+  // item natively (button onClick). Mouse-free sidebar navigation.
+  const navRef = useRef<HTMLElement>(null)
+  const handleNavKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    e.preventDefault()
+    const buttons = Array.from(navRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+    if (buttons.length === 0) return
+    const idx = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    let next = e.key === 'ArrowDown' ? idx + 1 : idx - 1
+    if (idx === -1) next = 0
+    else if (next < 0) next = buttons.length - 1
+    else if (next >= buttons.length) next = 0
+    buttons[next].focus()
+  }
+
   const menuItems = role === 'admin' ? adminMenuItems : userMenuItems
 
   return (
@@ -75,13 +94,13 @@ export default function Sidebar({ currentPage, onPageChange, language, role, onR
           </div>
         </div>
 
-        <nav className="flex-1 space-y-0 overflow-y-auto p-4">
+        <nav ref={navRef} onKeyDown={handleNavKeyDown} className="flex-1 space-y-0 overflow-y-auto p-4">
           {menuItems.map((item) => (
             <button
               type="button"
               key={item.id}
               onClick={() => handleNavigation(item.id)}
-              className={`w-full px-4 py-3 text-left text-sm font-medium transition-colors cursor-pointer ${
+              className={`w-full px-4 py-3 text-left text-sm font-medium transition-colors cursor-pointer focus:bg-gray-100 focus:outline-none ${
                 currentPage === item.id
                   ? 'border-l-2 border-black bg-gray-50 text-black'
                   : 'border-l-2 border-transparent text-gray-700 hover:bg-gray-50'

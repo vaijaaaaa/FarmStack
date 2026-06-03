@@ -2225,12 +2225,13 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
               {pagedInvoices.map((g) => (
                 <Fragment key={g.header.id}>
                   <tr
+                    tabIndex={0}
                     onClick={() =>
                       setExpandedInvoiceId(
                         expandedInvoiceId === String(g.header.id) ? null : String(g.header.id),
                       )
                     }
-                    className="cursor-pointer border-b border-gray-100 hover:bg-gray-50"
+                    className="cursor-pointer border-b border-gray-100 hover:bg-gray-50 focus:bg-blue-50 focus:outline-none"
                   >
                     <td className="px-4 py-3 text-sm text-gray-900">{g.header.supplier_name}</td>
                     <td className="px-4 py-3 text-sm text-gray-900">{g.header.supplier_invoice_number}</td>

@@ -51,11 +51,20 @@ function isVisible(el: HTMLElement): boolean {
   return el.offsetParent !== null || el.getClientRects().length > 0
 }
 
+// A valid navigation target: visible and not read-only. Read-only inputs
+// (computed totals like "Total Amount", display-only fields) are skipped so
+// arrow/Tab navigation never lands on something the user can't edit.
+function isNavigable(el: HTMLElement): boolean {
+  if (!isVisible(el)) return false
+  if ((el as HTMLInputElement).readOnly) return false
+  return true
+}
+
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 function getFocusable(root: ParentNode): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isVisible)
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isNavigable)
 }
 
 // Where Tab should be trapped: the topmost open modal if any, else the whole
@@ -83,6 +92,57 @@ function caretEdge(el: HTMLInputElement): { atStart: boolean; atEnd: boolean } |
   } catch {
     return null
   }
+}
+
+type Dir = 'up' | 'down' | 'left' | 'right'
+
+// Nearest focusable element in a given on-screen direction — 2D spatial /
+// "TV-remote" navigation based on bounding-rect geometry, not DOM order.
+function findSpatial(current: HTMLElement, dir: Dir): HTMLElement | null {
+  // Search within the current region (form / modal / sidebar / page) so focus
+  // moves orderly within a section instead of jumping across the whole screen.
+  const root =
+    (current.closest(
+      '[data-kbd-scope], form, [role="dialog"], .fixed.inset-0, nav, aside, main',
+    ) as HTMLElement | null) || getTrapRoot()
+  const candidates = getFocusable(root).filter((el) => el !== current)
+  const cur = current.getBoundingClientRect()
+  const cx = cur.left + cur.width / 2
+  const cy = cur.top + cur.height / 2
+  let best: HTMLElement | null = null
+  let bestScore = Infinity
+  for (const el of candidates) {
+    const r = el.getBoundingClientRect()
+    if (r.width === 0 && r.height === 0) continue
+    const dx = r.left + r.width / 2 - cx
+    const dy = r.top + r.height / 2 - cy
+    let primary: number
+    let perp: number
+    if (dir === 'right') {
+      if (dx <= 1) continue
+      primary = dx
+      perp = Math.abs(dy)
+    } else if (dir === 'left') {
+      if (dx >= -1) continue
+      primary = -dx
+      perp = Math.abs(dy)
+    } else if (dir === 'down') {
+      if (dy <= 1) continue
+      primary = dy
+      perp = Math.abs(dx)
+    } else {
+      if (dy >= -1) continue
+      primary = -dy
+      perp = Math.abs(dx)
+    }
+    // Favour elements aligned along the travel axis (small perpendicular offset).
+    const score = primary + perp * 2
+    if (score < bestScore) {
+      bestScore = score
+      best = el
+    }
+  }
+  return best
 }
 
 export default function FormKeyboardNav() {
@@ -159,7 +219,6 @@ export default function FormKeyboardNav() {
       const isArrow = isVertical || isHorizontal
       if (e.key !== 'Enter' && !isArrow) return
       if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
-      if (!scope) return
 
       const tag = target.tagName
       const inputType = (target as HTMLInputElement).type
@@ -171,14 +230,14 @@ export default function FormKeyboardNav() {
         inputType !== 'radio' &&
         inputType !== 'file'
 
-      // Arrow field-jump: plain inputs only. <select> keeps native option change
-      // and <textarea> keeps native cursor/line movement.
+      // ---- Arrow keys: 2D spatial navigation by on-screen position ----
       if (isArrow) {
-        if (!isManagedInput) return
-
-        // Left/Right move the caret inside the text and only jump fields at the
-        // field edge (or when there's no editable caret, e.g. number fields).
-        if (isHorizontal) {
+        // Keep native editing where it matters: <textarea> keeps all arrows,
+        // <select> keeps Up/Down (option change), and text inputs keep Left/Right
+        // caret movement until the caret reaches the field edge.
+        if (tag === 'TEXTAREA') return
+        if (tag === 'SELECT' && isVertical) return
+        if (isManagedInput && isHorizontal) {
           const caret = caretEdge(target as HTMLInputElement)
           if (caret) {
             if (e.key === 'ArrowRight' && !caret.atEnd) return
@@ -187,41 +246,88 @@ export default function FormKeyboardNav() {
         }
 
         const forward = e.key === 'ArrowDown' || e.key === 'ArrowRight'
-        const fields = Array.from(
-          scope.querySelectorAll<HTMLElement>(FIELD_SELECTOR),
-        ).filter(isVisible)
-        const idx = fields.indexOf(target)
-        if (idx === -1) return
-        const nextIdx = forward ? idx + 1 : idx - 1
-        if (nextIdx < 0 || nextIdx >= fields.length) {
-          e.preventDefault()
-          return
+
+        // Inside a form, fields follow ONE predictable sequence in visual / DOM
+        // order (Supplier Name → Invoice → Date → Sync → Product → Batch → …):
+        // forward = next field, backward = previous field. Read-only fields
+        // (e.g. Total Amount) are skipped automatically by getFocusable.
+        const formScope = target.closest('[data-kbd-scope], form') as HTMLElement | null
+        if (formScope && (tag === 'INPUT' || tag === 'SELECT')) {
+          const fields = getFocusable(formScope)
+          const idx = fields.indexOf(target)
+          if (idx !== -1) {
+            e.preventDefault()
+            e.stopPropagation()
+            const nx = fields[forward ? idx + 1 : idx - 1]
+            if (nx) {
+              nx.focus()
+              if (
+                nx instanceof HTMLInputElement &&
+                /^(text|search|tel|url|email|number|password)$/.test(nx.type)
+              ) {
+                nx.select()
+              }
+            }
+            return
+          }
         }
-        e.preventDefault()
-        const next = fields[nextIdx]
-        next.focus()
-        if (
-          next instanceof HTMLInputElement &&
-          /^(text|search|tel|url|email|number|password)$/.test(next.type)
-        ) {
-          next.select()
+
+        // Everything else (buttons, table rows, cards, sidebar): 2D spatial nav.
+        const dir: Dir =
+          e.key === 'ArrowUp'
+            ? 'up'
+            : e.key === 'ArrowDown'
+              ? 'down'
+              : e.key === 'ArrowLeft'
+                ? 'left'
+                : 'right'
+        const next = findSpatial(target, dir)
+        if (next) {
+          e.preventDefault()
+          e.stopPropagation()
+          next.focus()
+          if (
+            next instanceof HTMLInputElement &&
+            /^(text|search|tel|url|email|number|password)$/.test(next.type)
+          ) {
+            next.select()
+          }
+        } else if (!isManagedInput) {
+          e.preventDefault()
         }
         return
       }
 
-      // Enter: advance, or submit on the last field.
-      if (tag !== 'INPUT' && tag !== 'SELECT') return // textarea keeps newline
-      if (!isManagedInput && tag !== 'SELECT') return
+      // ---- Enter ----
+      // Checkbox / radio toggle; <select>/<textarea>/<button>/<a> keep their
+      // NATIVE behaviour (dropdown open+confirm, newline, click, follow link);
+      // other focusable non-fields (table rows, cards) click; text/number fields
+      // advance to the next field.
+      if (tag === 'INPUT' && (inputType === 'checkbox' || inputType === 'radio')) {
+        e.preventDefault()
+        target.click()
+        return
+      }
+      if (tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'A') {
+        return
+      }
+      if (tag !== 'INPUT') {
+        if (target.tabIndex >= 0) {
+          e.preventDefault()
+          target.click()
+        }
+        return
+      }
+      if (!isManagedInput) return
 
+      // Enter on a text/number field: advance to the next field, or submit on last.
+      if (!scope) return
       e.preventDefault()
-
       const fields = Array.from(
         scope.querySelectorAll<HTMLElement>(FIELD_SELECTOR),
-      ).filter(isVisible)
-
+      ).filter(isNavigable)
       const idx = fields.indexOf(target)
       if (idx === -1) return
-
       if (idx < fields.length - 1) {
         const next = fields[idx + 1]
         next.focus()
