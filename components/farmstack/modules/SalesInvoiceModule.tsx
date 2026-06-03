@@ -334,6 +334,16 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     (filterFromDate ? 1 : 0) +
     (filterToDate ? 1 : 0)
 
+  // Client-side pagination, 10 per page.
+  const PAGE_SIZE = 10
+  const [page, setPage] = useState(1)
+  const totalPages = Math.max(1, Math.ceil(visibleInvoices.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const pagedInvoices = visibleInvoices.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  useEffect(() => {
+    setPage(1)
+  }, [historyTab, filterCustomerId, filterProductId, filterFromDate, filterToDate])
+
   const clearFilters = () => {
     setFilterCustomerId('')
     setFilterProductId('')
@@ -1549,7 +1559,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               </tr>
             </thead>
             <tbody>
-              {visibleInvoices.map((inv) => {
+              {pagedInvoices.map((inv) => {
                 const customer = mockCustomers.find((c) => c.id === inv.customer_id)
                 return (
                   <Fragment key={inv.id}>
@@ -1697,6 +1707,31 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               )}
             </tbody>
           </table>
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
+              <span>
+                Page {currentPage} of {totalPages} · {visibleInvoices.length} total
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                  className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(currentPage + 1)}
+                  disabled={currentPage >= totalPages}
+                  className="rounded border border-gray-300 px-3 py-1 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

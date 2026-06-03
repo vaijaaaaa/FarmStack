@@ -18,10 +18,71 @@ import { useEffect } from 'react'
 
 const FIELD_SELECTOR = 'input, select, textarea'
 
+// Find the Cancel / Close / Back button in a modal or form, so Escape can "go
+// back". Honours an explicit [data-kbd-cancel] first, then aria-label, then text.
+function findCancelButton(scope: HTMLElement): HTMLElement | null {
+  const marked = scope.querySelector('[data-kbd-cancel]') as HTMLElement | null
+  if (marked) return marked
+  const buttons = Array.from(scope.querySelectorAll<HTMLElement>('button'))
+  const byAria = buttons.find((b) =>
+    /close|cancel|back/i.test(b.getAttribute('aria-label') || ''),
+  )
+  if (byAria) return byAria
+  return (
+    buttons.find((b) => {
+      const txt = (b.textContent || '').trim().toLowerCase()
+      return (
+        txt === 'cancel' ||
+        txt === 'close' ||
+        txt === 'back' ||
+        txt === '×' ||
+        txt === '✕' ||
+        txt === 'x' ||
+        txt.startsWith('back to') ||
+        txt.startsWith('← back')
+      )
+    }) || null
+  )
+}
+
 function isVisible(el: HTMLElement): boolean {
   if ((el as HTMLInputElement).disabled) return false
   if ((el as HTMLInputElement).type === 'hidden') return false
   return el.offsetParent !== null || el.getClientRects().length > 0
+}
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+function getFocusable(root: ParentNode): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isVisible)
+}
+
+// Where Tab should be trapped: the topmost open modal if any, else the whole
+// app. Keeps Tab from leaving the page into the browser chrome.
+function getTrapRoot(): HTMLElement {
+  const modals = Array.from(
+    document.querySelectorAll<HTMLElement>('.fixed.inset-0, [role="dialog"]'),
+  ).filter(isVisible)
+  for (let i = modals.length - 1; i >= 0; i--) {
+    if (getFocusable(modals[i]).length > 0) return modals[i]
+  }
+  return document.body
+}
+
+// Where the text caret sits, so Left/Right only jump fields at the field edge
+// (keeping normal cursor movement inside text). Returns null when the field has
+// no usable text caret (number / email / etc.) — those always jump on Left/Right.
+function caretEdge(el: HTMLInputElement): { atStart: boolean; atEnd: boolean } | null {
+  try {
+    if (typeof el.selectionStart !== 'number') return null
+    const start = el.selectionStart
+    const end = el.selectionEnd ?? start
+    if (start !== end) return { atStart: false, atEnd: false } // text selected → native
+    return { atStart: start === 0, atEnd: start === (el.value ?? '').length }
+  } catch {
+    return null
+  }
 }
 
 export default function FormKeyboardNav() {
@@ -30,7 +91,17 @@ export default function FormKeyboardNav() {
       const target = e.target as HTMLElement | null
       if (!target) return
 
-      const scope = target.closest('[data-kbd-scope]') as HTMLElement | null
+      // The "scope" is the set of fields to navigate among. An explicit
+      // [data-kbd-scope] wins (and enables Enter-to-submit via [data-kbd-submit]).
+      // Otherwise fall back so navigation works everywhere: the nearest form, a
+      // modal/dialog, this app's fixed-overlay modals, or the page content
+      // (<main>). Inputs outside all of these (header/sidebar) stay untouched.
+      const scope =
+        (target.closest('[data-kbd-scope]') as HTMLElement | null) ||
+        (target.closest('form') as HTMLElement | null) ||
+        (target.closest('[role="dialog"]') as HTMLElement | null) ||
+        (target.closest('.fixed') as HTMLElement | null) ||
+        (target.closest('main') as HTMLElement | null)
 
       // Ctrl/Cmd+S → submit
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
@@ -43,7 +114,49 @@ export default function FormKeyboardNav() {
         return
       }
 
-      const isArrow = e.key === 'ArrowDown' || e.key === 'ArrowUp'
+      // Escape → go back: close the nearest modal/form by clicking its
+      // Cancel/Close/Back button.
+      if (e.key === 'Escape') {
+        const escScope =
+          (target.closest('[role="dialog"]') as HTMLElement | null) ||
+          (target.closest('.fixed') as HTMLElement | null) ||
+          (target.closest('[data-kbd-scope]') as HTMLElement | null) ||
+          (target.closest('form') as HTMLElement | null)
+        const cancelBtn = escScope && findCancelButton(escScope)
+        if (cancelBtn) {
+          e.preventDefault()
+          cancelBtn.click()
+        }
+        return
+      }
+
+      // Tab trap: keep focus inside the app (or the open modal) instead of
+      // escaping to the browser toolbar. Only wraps at the first/last element;
+      // normal Tab between fields is left to the browser.
+      if (e.key === 'Tab') {
+        const root = getTrapRoot()
+        const focusables = getFocusable(root)
+        if (focusables.length === 0) return
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        const active = document.activeElement as HTMLElement | null
+        if (e.shiftKey) {
+          if (!active || active === first || !root.contains(active)) {
+            e.preventDefault()
+            last.focus()
+          }
+        } else {
+          if (!active || active === last || !root.contains(active)) {
+            e.preventDefault()
+            first.focus()
+          }
+        }
+        return
+      }
+
+      const isVertical = e.key === 'ArrowDown' || e.key === 'ArrowUp'
+      const isHorizontal = e.key === 'ArrowLeft' || e.key === 'ArrowRight'
+      const isArrow = isVertical || isHorizontal
       if (e.key !== 'Enter' && !isArrow) return
       if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
       if (!scope) return
@@ -58,16 +171,28 @@ export default function FormKeyboardNav() {
         inputType !== 'radio' &&
         inputType !== 'file'
 
-      // Up/Down field jump: plain inputs only. <select> keeps native option
-      // change and <textarea> keeps native line movement.
+      // Arrow field-jump: plain inputs only. <select> keeps native option change
+      // and <textarea> keeps native cursor/line movement.
       if (isArrow) {
         if (!isManagedInput) return
+
+        // Left/Right move the caret inside the text and only jump fields at the
+        // field edge (or when there's no editable caret, e.g. number fields).
+        if (isHorizontal) {
+          const caret = caretEdge(target as HTMLInputElement)
+          if (caret) {
+            if (e.key === 'ArrowRight' && !caret.atEnd) return
+            if (e.key === 'ArrowLeft' && !caret.atStart) return
+          }
+        }
+
+        const forward = e.key === 'ArrowDown' || e.key === 'ArrowRight'
         const fields = Array.from(
           scope.querySelectorAll<HTMLElement>(FIELD_SELECTOR),
         ).filter(isVisible)
         const idx = fields.indexOf(target)
         if (idx === -1) return
-        const nextIdx = e.key === 'ArrowDown' ? idx + 1 : idx - 1
+        const nextIdx = forward ? idx + 1 : idx - 1
         if (nextIdx < 0 || nextIdx >= fields.length) {
           e.preventDefault()
           return
