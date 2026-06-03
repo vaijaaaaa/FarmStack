@@ -1558,7 +1558,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
             <tbody>
               {visibleInvoices.map((inv) => {
                 const customer = mockCustomers.find((c) => c.id === inv.customer_id)
-                const tallyEligible = Boolean(inv.tally_sync_enabled)
                 return (
                   <Fragment key={inv.id}>
                     <tr
@@ -1574,22 +1573,16 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                       <td className="px-4 py-3 text-sm text-gray-900">{saleDate(inv)}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">₹{Number(inv.total).toFixed(2)}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        {tallyEligible ? (
-                          <TallyStatusCell
-                            type="sales"
-                            invoiceId={inv.id}
-                            status={inv.tally_sync_status || 'not_synced'}
-                            response={inv.tally_response}
-                            onSynced={refresh}
-                          />
-                        ) : (
-                          <span
-                            className="text-xs text-gray-400"
-                            title="Not synced to Tally at purchase — not applicable"
-                          >
-                            —
-                          </span>
-                        )}
+                        {/* Always show the sync cell. If the product's purchase
+                            isn't in Tally yet, syncing the sale will sync that
+                            purchase first, then post the sale. */}
+                        <TallyStatusCell
+                          type="sales"
+                          invoiceId={inv.id}
+                          status={inv.tally_sync_status || 'not_synced'}
+                          response={inv.tally_response}
+                          onSynced={refresh}
+                        />
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
                         <div className="flex items-center gap-2">

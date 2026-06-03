@@ -200,9 +200,13 @@ export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
   }
 }
 
-// Business rule: a product can only be sold to Tally if it was purchased with a
-// Tally-synced purchase. Otherwise the stock never reached Tally => block.
-async function findBlockedProduct(productIds: string[]): Promise<string | null> {
+// A product's stock must exist in Tally (via a synced purchase) before its sale
+// can post. If a product has no synced purchase yet, sync that product's
+// purchase(s) FIRST, then the sale can go through. A product that was never
+// purchased at all genuinely can't be sold to Tally.
+async function ensurePurchasesSyncedForSale(
+  productIds: string[],
+): Promise<{ ok: boolean; message?: string }> {
   for (const pid of productIds) {
     if (!pid) continue
     const synced = await queryOne<{ c: number }>(
@@ -212,9 +216,37 @@ async function findBlockedProduct(productIds: string[]): Promise<string | null> 
        WHERE pit.product_id = ? AND pi.tally_sync_status = 'synced'`,
       [pid],
     )
-    if (!synced || synced.c === 0) return pid
+    if (synced && synced.c > 0) continue // already has a synced purchase
+
+    // Sync this product's not-yet-synced purchase(s) so its stock reaches Tally.
+    const pending = await query<{ invoice_id: string }>(
+      `SELECT DISTINCT pit.invoice_id
+       FROM purchase_items pit
+       JOIN purchase_invoices pi ON pi.id = pit.invoice_id
+       WHERE pit.product_id = ? AND pi.tally_sync_status <> 'synced'`,
+      [pid],
+    )
+    if (pending.length === 0) {
+      const name = (await productName(pid)) || 'a product'
+      return {
+        ok: false,
+        message: `"${name}" has no purchase yet. Add a purchase for it first, then sync this sale.`,
+      }
+    }
+    let anySynced = false
+    for (const row of pending) {
+      const out = await syncPurchaseInvoice(String(row.invoice_id))
+      if (out.status === 'synced') anySynced = true
+    }
+    if (!anySynced) {
+      const name = (await productName(pid)) || 'a product'
+      return {
+        ok: false,
+        message: `Could not sync the purchase for "${name}" to Tally. Fix that purchase, then sync this sale.`,
+      }
+    }
   }
-  return null
+  return { ok: true }
 }
 
 export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
@@ -229,12 +261,15 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
     [id],
   )
 
-  const blockedPid = await findBlockedProduct(items.map((it) => String(it.product_id)))
-  if (blockedPid) {
-    const name = (await productName(blockedPid)) || 'a product'
+  // Make sure every product's stock is in Tally first — syncing its purchase(s)
+  // automatically if needed. Only genuinely un-purchased products block the sale.
+  const ensure = await ensurePurchasesSyncedForSale([
+    ...new Set(items.map((it) => String(it.product_id)).filter(Boolean)),
+  ])
+  if (!ensure.ok) {
     const outcome: SyncOutcome = {
       status: 'blocked',
-      message: `Sale cannot be synced because "${name}" was purchased without Tally sync, so its stock/batch does not exist in Tally.`,
+      message: ensure.message || 'Sale cannot be synced.',
     }
     await setSalesStatus(id, outcome)
     return outcome
