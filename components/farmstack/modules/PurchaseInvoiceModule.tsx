@@ -1449,7 +1449,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
               </button>
               <button
                 onClick={handleAddSupplier}
-                className="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-2 rounded-lg"
+                className="bg-black hover:bg-gray-600 text-white font-medium px-6 py-2 rounded-lg"
               >
                 Add Supplier
               </button>
@@ -1542,7 +1542,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 </button>
                 <button
                   onClick={handleSupplierSearch}
-                  className="bg-blue-500 hover:bg-blue-600 text-white font-medium px-6 py-2 rounded-lg"
+                  className="bg-black hover:bg-gray-600 text-white font-medium px-6 py-2 rounded-lg"
                 >
                   Search
                 </button>
