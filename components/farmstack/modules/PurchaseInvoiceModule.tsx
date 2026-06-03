@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, Download, Filter, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import TallyStatusCell from '../components/TallyStatusCell'
 import BulkUploadModal, { type ParsedPurchaseRow } from './purchase/BulkUploadModal'
+import { printHtml } from '@/lib/printHtml'
 
 // Today's date as YYYY-MM-DD (local time) for date inputs.
 const todayISO = () => {
@@ -735,8 +736,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   }
 
   const printInvoice = (group: { header: PRow; items: PRow[]; total: number }) => {
-    const w = window.open('', '_blank', 'width=820,height=920')
-    if (!w) { toast.error('Please allow pop-ups to print the invoice'); return }
     const h = group.header
     const rows = group.items.map((it) => `
       <tr>
@@ -748,7 +747,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         <td style="text-align:center">${it.expiry_date || '—'}</td>
         <td style="text-align:right">₹${Number(it.total_price || 0).toFixed(2)}</td>
       </tr>`).join('')
-    w.document.write(`<!doctype html><html><head><title>Invoice ${h.supplier_invoice_number ?? ''}</title>
+    printHtml(`<!doctype html><html><head><title>Invoice ${h.supplier_invoice_number ?? ''}</title>
       <style>
         body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:28px}
         h1{font-size:20px;margin:0 0 4px} .muted{color:#555;font-size:13px}
@@ -775,7 +774,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
         <td style="text-align:right">₹${group.total.toFixed(2)}</td></tr></tfoot>
       </table>
       </body></html>`)
-    w.document.close(); w.focus(); w.print()
   }
 
   // ----- Uniqueness checks ------------------------------------------------

@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, Download, Filter, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import TallyStatusCell from '../components/TallyStatusCell'
 import SalesBulkUploadModal, { type ParsedSalesRow } from './sales/BulkUploadModal'
+import { printHtml } from '@/lib/printHtml'
 
 // Today's date as YYYY-MM-DD (local time) for date inputs.
 const todayISO = () => {
@@ -421,13 +422,8 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     toast.success('Sales invoices exported')
   }
 
-  // Open a printable sale invoice in a new window (user can Save as PDF).
+  // Print a sale invoice (via hidden iframe — no pop-up needed; Save as PDF works).
   const printSaleInvoice = (inv: SalesInvoice) => {
-    const w = window.open('', '_blank', 'width=820,height=920')
-    if (!w) {
-      toast.error('Please allow pop-ups to print the invoice')
-      return
-    }
     const rows = inv.items
       .map((it) => {
         const product = mockProducts.find((p) => p.id === it.product_id)
@@ -443,7 +439,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         </tr>`
       })
       .join('')
-    w.document.write(`<!doctype html><html><head><title>Invoice ${inv.invoice_number ?? ''}</title>
+    printHtml(`<!doctype html><html><head><title>Invoice ${inv.invoice_number ?? ''}</title>
       <style>
         body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:28px}
         h1{font-size:20px;margin:0 0 4px} .muted{color:#555;font-size:13px}
@@ -470,9 +466,6 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         <td style="text-align:right">₹${Number(inv.total).toFixed(2)}</td></tr></tfoot>
       </table>
       </body></html>`)
-    w.document.close()
-    w.focus()
-    w.print()
   }
 
   // ----- Form handlers ----------------------------------------------------
