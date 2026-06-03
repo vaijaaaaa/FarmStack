@@ -31,11 +31,14 @@ export async function checkTallyConnection(): Promise<ConnectionResult> {
     })
     const raw = await res.text()
     const running = res.ok || /running|tallyprime|tally/i.test(raw)
+    const tunnelButTallyDown = !running && (res.status >= 520 || res.status === 502 || res.status === 504)
     return {
       connected: running,
       message: running
         ? 'TallyPrime Server is running'
-        : 'Unexpected response from TallyPrime',
+        : tunnelButTallyDown
+          ? 'Tunnel is reachable but Tally is not. Open TallyPrime (HTTP server on port 9000).'
+          : 'Unexpected response from TallyPrime',
       raw,
     }
   } catch (err) {
@@ -58,7 +61,14 @@ export async function postXml(xml: string): Promise<string> {
   }
   const text = await res.text()
   if (!res.ok) {
-    throw new Error(`TallyPrime returned HTTP ${res.status}: ${text.slice(0, 300)}`)
+    // Cloudflare/ngrok return 5xx (520-530, 502, 504) when the tunnel is up but
+    // Tally behind it is closed/unreachable — show a clear message, not raw HTML.
+    if (res.status >= 520 || res.status === 502 || res.status === 504) {
+      throw new Error(
+        'Could not reach Tally through the tunnel. Make sure TallyPrime is open (HTTP server on port 9000) and the tunnel window is still running.',
+      )
+    }
+    throw new Error(`TallyPrime returned HTTP ${res.status}: ${text.slice(0, 200)}`)
   }
   return text
 }

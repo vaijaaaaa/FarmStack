@@ -19,16 +19,25 @@ export default function TallySyncModule({ language }: TallySyncModuleProps) {
     message: string
   }>({ state: 'unknown', message: '' })
 
-  const checkConnection = async () => {
-    setConn({ state: 'checking', message: 'Checking connection…' })
+  // silent = background re-check (no "Checking…" flicker).
+  const checkConnection = async (silent = false) => {
+    if (!silent) setConn({ state: 'checking', message: 'Checking connection…' })
     const res = await tallyApi.status()
     setConn({ state: res.connected ? 'ok' : 'fail', message: res.message })
   }
 
-  // Load the saved Tally URL and test the connection on first open.
+  // Load the saved URL, test once, then keep the status live: re-check every
+  // 20s and whenever the tab regains focus, so it turns red if Tally goes down.
   useEffect(() => {
     setTallyUrl(getStoredTallyUrl())
     checkConnection()
+    const interval = setInterval(() => checkConnection(true), 20000)
+    const onFocus = () => checkConnection(true)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('focus', onFocus)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -104,7 +113,7 @@ export default function TallySyncModule({ language }: TallySyncModuleProps) {
             <Button onClick={handleSaveUrl} className="bg-black text-white hover:bg-gray-900">
               Save
             </Button>
-            <Button onClick={checkConnection} variant="outline">
+            <Button onClick={() => checkConnection()} variant="outline">
               Test Connection
             </Button>
           </div>
