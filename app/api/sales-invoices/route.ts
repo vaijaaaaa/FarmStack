@@ -20,10 +20,11 @@ interface SalesItemInput {
 
 export async function GET() {
   try {
-    const invoices = await query<Record<string, unknown>>(
-      'SELECT * FROM sales_invoices ORDER BY created_at DESC',
-    )
-    const items = await query<Record<string, unknown>>('SELECT * FROM sales_items')
+    // Run both reads in parallel — one network round-trip instead of two.
+    const [invoices, items] = await Promise.all([
+      query<Record<string, unknown>>('SELECT * FROM sales_invoices ORDER BY created_at DESC'),
+      query<Record<string, unknown>>('SELECT * FROM sales_items'),
+    ])
     const byInvoice = new Map<string, unknown[]>()
     for (const it of items) {
       const key = String(it.invoice_id)

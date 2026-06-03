@@ -155,3 +155,5 @@ CREATE TABLE IF NOT EXISTS purchase_items (
 
 CREATE INDEX IF NOT EXISTS idx_sales_items_invoice ON sales_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_items_invoice ON purchase_items(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_sales_invoices_created ON sales_invoices(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_created ON purchase_invoices(created_at DESC);
