@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Language } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
-import { mockSyncLogs } from '@/lib/mock-data'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { tallyApi, getStoredTallyUrl, TALLY_URL_STORAGE_KEY } from '@/src/services/api'
@@ -15,7 +14,7 @@ const TUNNEL_CMD = 'cloudflared tunnel --url http://localhost:9000'
 
 export default function TallySyncModule({ language }: TallySyncModuleProps) {
   const t = (key: string) => getTranslation(language, key)
-  const [syncLogs] = useState(mockSyncLogs)
+  const [syncLogs] = useState<any[]>([])
   const [tallyUrl, setTallyUrl] = useState('')
   const [conn, setConn] = useState<{
     state: 'unknown' | 'checking' | 'ok' | 'fail'
@@ -174,45 +173,49 @@ export default function TallySyncModule({ language }: TallySyncModuleProps) {
 
       <div className="rounded-lg border border-gray-200 bg-white p-6">
         <h3 className="mb-4 text-lg font-semibold text-black">Sync Logs</h3>
-        <div className="space-y-3">
-          {syncLogs.map((log) => (
-            <div
-              key={log.id}
-              className={`rounded-lg border-l-4 p-4 ${
-                log.type === 'success'
-                  ? 'border-l-green-500 bg-green-50'
-                  : 'border-l-red-500 bg-red-50'
-              }`}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <p
-                    className={`font-medium ${
-                      log.type === 'success' ? 'text-green-900' : 'text-red-900'
+        {syncLogs.length === 0 ? (
+          <p className="text-sm text-gray-500">No sync logs yet. Sync will appear here when you sync invoices.</p>
+        ) : (
+          <div className="space-y-3">
+            {syncLogs.map((log) => (
+              <div
+                key={log.id}
+                className={`rounded-lg border-l-4 p-4 ${
+                  log.type === 'success'
+                    ? 'border-l-green-500 bg-green-50'
+                    : 'border-l-red-500 bg-red-50'
+                }`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <p
+                      className={`font-medium ${
+                        log.type === 'success' ? 'text-green-900' : 'text-red-900'
+                      }`}
+                    >
+                      {log.message}
+                    </p>
+                    {log.error && (
+                      <p className="mt-1 text-sm text-gray-600">{log.error}</p>
+                    )}
+                  </div>
+                  <span
+                    className={`ml-4 text-xs font-semibold ${
+                      log.type === 'success'
+                        ? 'text-green-700'
+                        : 'text-red-700'
                     }`}
                   >
-                    {log.message}
-                  </p>
-                  {log.error && (
-                    <p className="mt-1 text-sm text-gray-600">{log.error}</p>
-                  )}
+                    {log.type === 'success' ? t('synced') : t('failed')}
+                  </span>
                 </div>
-                <span
-                  className={`ml-4 text-xs font-semibold ${
-                    log.type === 'success'
-                      ? 'text-green-700'
-                      : 'text-red-700'
-                  }`}
-                >
-                  {log.type === 'success' ? t('synced') : t('failed')}
-                </span>
+                <p className="mt-2 text-xs text-gray-500">
+                  {new Date(log.timestamp).toLocaleString()}
+                </p>
               </div>
-              <p className="mt-2 text-xs text-gray-500">
-                {new Date(log.timestamp).toLocaleString()}
-              </p>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
