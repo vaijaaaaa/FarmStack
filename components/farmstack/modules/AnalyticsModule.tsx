@@ -4,6 +4,9 @@ import { useEffect, useRef } from 'react'
 import { Language } from '@/types/farmstack'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { BarChart2, TrendingDown, AlertTriangle, Package } from 'lucide-react'
+import ProductSaleQtyTab from './analytics/ProductSaleQtyTab'
+import NearExpiryTab from './analytics/NearExpiryTab'
+import StockTab from './analytics/StockTab'
 
 interface AnalyticsModuleProps {
   language: Language
@@ -39,8 +42,6 @@ const TABS = [
     description: 'All products with current quantity and price',
   },
 ] as const
-
-type TabValue = (typeof TABS)[number]['value']
 
 export default function AnalyticsModule({ language }: AnalyticsModuleProps) {
   const tabsRef = useRef<HTMLDivElement>(null)
@@ -83,7 +84,7 @@ export default function AnalyticsModule({ language }: AnalyticsModuleProps) {
               >
                 <Icon className="h-4 w-4 shrink-0" />
                 <span>{tab.label}</span>
-                <kbd className="ml-1 rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 text-[10px] font-mono text-gray-400 data-[state=active]:border-gray-200 data-[state=active]:bg-gray-100">
+                <kbd className="ml-1 rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-mono text-[10px] text-gray-400">
                   {tab.shortcut}
                 </kbd>
               </TabsTrigger>
@@ -91,19 +92,28 @@ export default function AnalyticsModule({ language }: AnalyticsModuleProps) {
           })}
         </TabsList>
 
-        {TABS.map((tab) => {
-          const Icon = tab.icon
-          return (
-            <TabsContent key={tab.value} value={tab.value}>
-              <div className="mt-4 rounded-xl border border-gray-200 bg-white p-10 text-center">
-                <Icon className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-                <h2 className="text-lg font-semibold text-gray-800">{tab.label}</h2>
-                <p className="mt-1 text-sm text-gray-500">{tab.description}</p>
-                <p className="mt-4 text-xs text-gray-400">Coming soon</p>
-              </div>
-            </TabsContent>
-          )
-        })}
+        <TabsContent value="product-sale-qty">
+          <ProductSaleQtyTab />
+        </TabsContent>
+
+        <TabsContent value="run-rate">
+          <div className="mt-4 rounded-xl border border-gray-200 bg-white p-12 text-center">
+            <TrendingDown className="mx-auto mb-3 h-10 w-10 text-gray-200" />
+            <h2 className="text-base font-semibold text-gray-700">Run Rate</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Products that will go out of stock within 10 days
+            </p>
+            <p className="mt-4 text-xs text-gray-300">Coming soon</p>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="near-expiry">
+          <NearExpiryTab />
+        </TabsContent>
+
+        <TabsContent value="stock">
+          <StockTab />
+        </TabsContent>
       </Tabs>
     </div>
   )
