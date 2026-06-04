@@ -1006,6 +1006,14 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                       setShowSupplierDropdown(true)
                     }}
                     onFocus={() => setShowSupplierDropdown(true)}
+                    onBlur={(e) => {
+                      // Close when focus leaves the field + dropdown (Tab to next
+                      // field, or click elsewhere). Stays open while a dropdown
+                      // item is being clicked (it's inside supplierDropdownRef).
+                      if (!supplierDropdownRef.current?.contains(e.relatedTarget as Node)) {
+                        setShowSupplierDropdown(false)
+                      }
+                    }}
                     className="w-full rounded-md border-2 border-blue-500 px-4 py-2 text-left text-gray-700 bg-blue-50 focus:outline-none font-medium placeholder:font-normal placeholder:text-gray-400"
                   />
                   {showSupplierDropdown && (
@@ -1023,6 +1031,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                             .map((supplier) => (
                               <button
                                 key={supplier.id}
+                                tabIndex={-1}
                                 onClick={() => handleSupplierSelect(supplier.id)}
                                 className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0"
                               >
@@ -1036,12 +1045,14 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                           )}
                         </div>
                         <button
+                          tabIndex={-1}
                           onClick={() => handleSupplierSelect('add')}
                           className="w-full text-left px-4 py-2 hover:bg-green-50 font-semibold text-green-600 border-t border-gray-300"
                         >
                           + Add Supplier
                         </button>
                         <button
+                          tabIndex={-1}
                           onClick={() => handleSupplierSelect('search')}
                           className="w-full text-left px-4 py-2 hover:bg-blue-50 font-semibold text-blue-600 border-t border-gray-300"
                         >

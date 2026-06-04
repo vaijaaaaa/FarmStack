@@ -57,6 +57,9 @@ function isVisible(el: HTMLElement): boolean {
 function isNavigable(el: HTMLElement): boolean {
   if (!isVisible(el)) return false
   if ((el as HTMLInputElement).readOnly) return false
+  // tabindex=-1 = intentionally removed from keyboard navigation (read-only
+  // display fields, items inside a custom dropdown that Tab should skip, etc.).
+  if (el.tabIndex < 0) return false
   return true
 }
 
@@ -190,27 +193,24 @@ export default function FormKeyboardNav() {
         return
       }
 
-      // Tab trap: keep focus inside the app (or the open modal) instead of
-      // escaping to the browser toolbar. Only wraps at the first/last element;
-      // normal Tab between fields is left to the browser.
+      // Tab moves through NAVIGABLE elements only — read-only/calculated fields
+      // (e.g. Total Amount) and tabindex=-1 items are skipped automatically — and
+      // wraps inside the app/modal so focus never escapes to the browser toolbar.
       if (e.key === 'Tab') {
         const root = getTrapRoot()
-        const focusables = getFocusable(root)
+        const focusables = getFocusable(root) // excludes read-only / disabled / tabindex=-1
         if (focusables.length === 0) return
-        const first = focusables[0]
-        const last = focusables[focusables.length - 1]
         const active = document.activeElement as HTMLElement | null
-        if (e.shiftKey) {
-          if (!active || active === first || !root.contains(active)) {
-            e.preventDefault()
-            last.focus()
-          }
-        } else {
-          if (!active || active === last || !root.contains(active)) {
-            e.preventDefault()
-            first.focus()
-          }
+        const idx = active ? focusables.indexOf(active) : -1
+        e.preventDefault()
+        if (idx === -1) {
+          // Focus isn't on a navigable element (e.g. a read-only field) — jump to
+          // the first/last navigable one.
+          ;(e.shiftKey ? focusables[focusables.length - 1] : focusables[0]).focus()
+          return
         }
+        const nextIdx = (idx + (e.shiftKey ? -1 : 1) + focusables.length) % focusables.length
+        focusables[nextIdx].focus()
         return
       }
 
