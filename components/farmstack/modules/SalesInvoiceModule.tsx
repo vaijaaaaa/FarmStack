@@ -253,6 +253,16 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const selectedCustomerLabel =
     mockCustomers.find((c) => c.id === selectedCustomerId)?.name || ''
 
+  // Tally Name can only be "Cash" or the currently selected customer. When the
+  // customer changes, drop any stale selection (e.g. a previously chosen
+  // customer) back to the default "Cash".
+  useEffect(() => {
+    setSelectedTallyName((prev) =>
+      prev !== 'Cash' && prev !== selectedCustomerLabel ? 'Cash' : prev,
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomerLabel])
+
   // ----- Inline add-customer ---------------------------------------------
   const openAddCustomer = () => {
     setNewCustomer({ ...emptyNewCustomer, name: customerSearch.trim() })
@@ -300,6 +310,8 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         tally_ledger_name: newCustomer.name,
       })
       setSelectedCustomerId(created.id)
+      // A customer created from this page becomes the Tally party name too.
+      setSelectedTallyName(created.name)
       setShowAddCustomerModal(false)
       setNewCustomer({ ...emptyNewCustomer })
       setCustomerErrors([])
@@ -846,11 +858,9 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                     className="w-full rounded-md border border-gray-400 px-3 py-2 text-sm text-gray-700 bg-gray-50 focus:outline-none"
                   >
                     <option value="Cash">Cash</option>
-                    {mockCustomers.map((customer) => (
-                      <option key={customer.id} value={customer.name}>
-                        {customer.name}
-                      </option>
-                    ))}
+                    {selectedCustomerLabel && (
+                      <option value={selectedCustomerLabel}>{selectedCustomerLabel}</option>
+                    )}
                   </select>
                 </div>
 
