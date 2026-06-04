@@ -180,6 +180,9 @@ export default function FormKeyboardNav() {
       // Escape → go back: close the nearest modal/form by clicking its
       // Cancel/Close/Back button.
       if (e.key === 'Escape') {
+        // If focus is inside an open custom dropdown, let it close itself first
+        // (its own Escape handler) rather than cancelling the whole form.
+        if (target.closest('[data-dropdown-open]')) return
         const escScope =
           (target.closest('[role="dialog"]') as HTMLElement | null) ||
           (target.closest('.fixed') as HTMLElement | null) ||

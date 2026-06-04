@@ -130,6 +130,8 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const [supplierSearchResults, setSupplierSearchResults] = useState<Supplier[]>([])
   const [supplierSearchPerformed, setSupplierSearchPerformed] = useState(false)
   const supplierDropdownRef = useRef<HTMLDivElement>(null)
+  const supplierFieldRef = useRef<HTMLDivElement>(null) // wraps input + dropdown
+  const supplierInvoiceRef = useRef<HTMLInputElement>(null) // next field after selection
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null)
   // ----- Purchase history filters ----------------------------------------
   const [showFilterPanel, setShowFilterPanel] = useState(false)
@@ -498,6 +500,8 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       setSelectedSupplier(supplierId)
       setSupplierSearch(mockSuppliers.find((s) => s.id === supplierId)?.name || '')
       setShowSupplierDropdown(false)
+      // After a selection, move focus to the next field (Supplier Invoice Number).
+      setTimeout(() => supplierInvoiceRef.current?.focus(), 0)
     }
   }
 
@@ -994,7 +998,24 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
             <div className="mb-8">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">
                 {/* Supplier Name */}
-                <div className="relative flex flex-col gap-1">
+                <div
+                  ref={supplierFieldRef}
+                  data-dropdown-open={showSupplierDropdown ? '' : undefined}
+                  onBlur={(e) => {
+                    // Close once focus leaves the whole field (input + all dropdown
+                    // items): tabbing past the last item, clicking elsewhere, etc.
+                    if (!supplierFieldRef.current?.contains(e.relatedTarget as Node)) {
+                      setShowSupplierDropdown(false)
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape' && showSupplierDropdown) {
+                      e.stopPropagation()
+                      setShowSupplierDropdown(false)
+                    }
+                  }}
+                  className="relative flex flex-col gap-1"
+                >
                   <label className="text-gray-700 font-medium text-xs">Supplier Name</label>
                   <input
                     type="text"
@@ -1006,14 +1027,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                       setShowSupplierDropdown(true)
                     }}
                     onFocus={() => setShowSupplierDropdown(true)}
-                    onBlur={(e) => {
-                      // Close when focus leaves the field + dropdown (Tab to next
-                      // field, or click elsewhere). Stays open while a dropdown
-                      // item is being clicked (it's inside supplierDropdownRef).
-                      if (!supplierDropdownRef.current?.contains(e.relatedTarget as Node)) {
-                        setShowSupplierDropdown(false)
-                      }
-                    }}
                     className="w-full rounded-md border-2 border-blue-500 px-4 py-2 text-left text-gray-700 bg-blue-50 focus:outline-none font-medium placeholder:font-normal placeholder:text-gray-400"
                   />
                   {showSupplierDropdown && (
@@ -1031,9 +1044,8 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                             .map((supplier) => (
                               <button
                                 key={supplier.id}
-                                tabIndex={-1}
                                 onClick={() => handleSupplierSelect(supplier.id)}
-                                className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0"
+                                className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0 focus:bg-blue-100 focus:outline-none"
                               >
                                 {supplier.name}
                               </button>
@@ -1045,16 +1057,14 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                           )}
                         </div>
                         <button
-                          tabIndex={-1}
                           onClick={() => handleSupplierSelect('add')}
-                          className="w-full text-left px-4 py-2 hover:bg-green-50 font-semibold text-green-600 border-t border-gray-300"
+                          className="w-full text-left px-4 py-2 hover:bg-green-50 focus:bg-green-100 focus:outline-none font-semibold text-green-600 border-t border-gray-300"
                         >
                           + Add Supplier
                         </button>
                         <button
-                          tabIndex={-1}
                           onClick={() => handleSupplierSelect('search')}
-                          className="w-full text-left px-4 py-2 hover:bg-blue-50 font-semibold text-blue-600 border-t border-gray-300"
+                          className="w-full text-left px-4 py-2 hover:bg-blue-50 focus:bg-blue-100 focus:outline-none font-semibold text-blue-600 border-t border-gray-300"
                         >
                           🔍 Search Supplier
                         </button>
@@ -1067,6 +1077,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 <div className="flex flex-col gap-1">
                   <label className="text-gray-700 font-medium text-xs">Supplier Invoice Number</label>
                   <input
+                    ref={supplierInvoiceRef}
                     type="text"
                     placeholder="Supplier Invoice Number"
                     value={supplierInvoiceNumber}
