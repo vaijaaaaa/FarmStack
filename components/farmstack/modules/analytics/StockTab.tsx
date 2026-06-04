@@ -4,22 +4,23 @@ import { useMemo, useState } from 'react'
 import { Package } from 'lucide-react'
 import { useProducts, usePurchaseInvoices, useSalesInvoices } from '@/hooks/useDatabase'
 
+function getStockStatus(available: number): 'in-stock' | 'low-stock' | 'out-of-stock' {
+  if (available <= 0) return 'out-of-stock'
+  if (available <= 10) return 'low-stock'
+  return 'in-stock'
+}
+
 function stockBadge(available: number) {
   if (available <= 0) return { text: 'Out of Stock', cls: 'bg-red-100 text-red-700' }
   if (available <= 10) return { text: 'Low Stock', cls: 'bg-yellow-100 text-yellow-700' }
   return { text: 'In Stock', cls: 'bg-green-100 text-green-700' }
 }
 
-// Normalise any date string to YYYY-MM-DD for comparison
-function toYMD(raw: string): string {
-  if (!raw?.trim()) return ''
-  // Already YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10)
-  // DD/MM/YYYY
-  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
-  return raw.slice(0, 10)
-}
+const STATUS_FILTERS = [
+  { id: 'in-stock', label: 'In Stock', cls: 'bg-green-100 text-green-700 border-green-300' },
+  { id: 'low-stock', label: 'Low Stock', cls: 'bg-yellow-100 text-yellow-700 border-yellow-300' },
+  { id: 'out-of-stock', label: 'Out of Stock', cls: 'bg-red-100 text-red-700 border-red-300' },
+]
 
 export default function StockTab() {
   const { products, loading: pLoading } = useProducts()
@@ -27,36 +28,22 @@ export default function StockTab() {
   const { invoices: salesInvoices, loading: siLoading } = useSalesInvoices()
 
   const [search, setSearch] = useState('')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  const [selectedStatus, setSelectedStatus] = useState<string>('')
 
   const loading = pLoading || piLoading || siLoading
 
   const rows = useMemo(() => {
-    const from = fromDate || ''
-    const to = toDate || ''
-
-    // Filter and sum purchased qty per product
+    // Sum purchased qty per product from purchase rows
     const purchased = new Map<string, number>()
     for (const r of purchaseRows) {
       const id = String(r.product_id || '')
       if (!id) continue
-      if (from || to) {
-        const d = toYMD(r.purchase_date || '')
-        if (from && d < from) continue
-        if (to && d > to) continue
-      }
       purchased.set(id, (purchased.get(id) || 0) + Number(r.quantity || 0))
     }
 
-    // Filter and sum sold qty per product
+    // Sum sold qty per product from sales invoice items
     const sold = new Map<string, number>()
     for (const inv of salesInvoices) {
-      if (from || to) {
-        const d = toYMD(inv.date || '')
-        if (from && d < from) continue
-        if (to && d > to) continue
-      }
       for (const it of inv.items || []) {
         const id = String(it.product_id || '')
         if (!id) continue
@@ -77,19 +64,40 @@ export default function StockTab() {
           sold: sell,
           available: buy - sell,
           price: p.selling_price || 0,
+          status: getStockStatus(buy - sell),
         }
       })
       .filter((r) => r.purchased > 0 || r.sold > 0)
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [products, purchaseRows, salesInvoices, fromDate, toDate])
+  }, [products, purchaseRows, salesInvoices])
 
   const filtered = useMemo(() => {
+    let result = rows
+
+    // Filter by search
     const q = search.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter(
-      (r) => r.name.toLowerCase().includes(q) || r.type.toLowerCase().includes(q),
-    )
-  }, [rows, search])
+    if (q) {
+      result = result.filter(
+        (r) => r.name.toLowerCase().includes(q) || r.type.toLowerCase().includes(q),
+      )
+    }
+
+    // Filter by status (if selected)
+    if (selectedStatus) {
+      result = result.filter((r) => r.status === selectedStatus)
+    }
+
+    return result
+  }, [rows, search, selectedStatus])
+
+  const toggleStatus = (statusId: string) => {
+    setSelectedStatus(selectedStatus === statusId ? '' : statusId)
+  }
+
+  const clearAll = () => {
+    setSearch('')
+    setSelectedStatus('')
+  }
 
   if (loading) {
     return <p className="mt-10 text-center text-sm text-gray-400">Loading…</p>
@@ -98,7 +106,7 @@ export default function StockTab() {
   return (
     <div className="mt-4">
       {/* Filter bar */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-4">
         <input
           type="text"
           placeholder="Search product or type…"
@@ -107,32 +115,29 @@ export default function StockTab() {
           className="w-56 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-gray-400"
         />
 
+        {/* Status filter buttons */}
         <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-400">From</label>
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-gray-400"
-          />
+          {STATUS_FILTERS.map((status) => (
+            <button
+              key={status.id}
+              onClick={() => toggleStatus(status.id)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                selectedStatus === status.id
+                  ? `${status.cls} border-current`
+                  : 'border-gray-200 bg-white text-gray-500 hover:border-gray-400'
+              }`}
+            >
+              {status.label}
+            </button>
+          ))}
         </div>
 
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-400">To</label>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-gray-400"
-          />
-        </div>
-
-        {(fromDate || toDate) && (
+        {(search || selectedStatus) && (
           <button
-            onClick={() => { setFromDate(''); setToDate('') }}
+            onClick={clearAll}
             className="text-sm text-gray-400 hover:text-gray-600"
           >
-            Clear dates
+            Clear all
           </button>
         )}
 
@@ -145,7 +150,7 @@ export default function StockTab() {
         <div className="rounded-xl border border-gray-200 bg-white p-12 text-center">
           <Package className="mx-auto mb-3 h-8 w-8 text-gray-200" />
           <p className="text-sm text-gray-400">
-            {search || fromDate || toDate
+            {search || selectedStatus
               ? 'No products match the selected filters'
               : 'No stock data found'}
           </p>
