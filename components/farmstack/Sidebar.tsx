@@ -4,7 +4,7 @@ import { useRef } from 'react'
 import { Language, UserRole } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
 
-type Page = 'dashboard' | 'customers' | 'suppliers' | 'products' | 'sales_invoice' | 'purchase_invoice' | 'tally_sync' | 'settings' | 'analytics' | 'type' | 'accounts' | 'crop_purchase' | 'entries'
+type Page = 'dashboard' | 'customers' | 'suppliers' | 'products' | 'sales_invoice' | 'purchase_invoice' | 'tally_sync' | 'settings' | 'analytics' | 'accounts' | 'crop_purchase' | 'entries'
 
 interface SidebarProps {
   currentPage: Page
@@ -30,7 +30,6 @@ const adminMenuItems: { id: Page; key: string }[] = [
   { id: 'suppliers', key: 'suppliers' },
   { id: 'customers', key: 'customers' },
   { id: 'products', key: 'products' },
-  { id: 'type', key: 'type' },
   { id: 'analytics', key: 'analytics' },
   { id: 'accounts', key: 'accounts' },
   { id: 'crop_purchase', key: 'crop_purchase' },

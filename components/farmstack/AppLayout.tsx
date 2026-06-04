@@ -15,12 +15,11 @@ import PurchaseInvoiceModule from './modules/PurchaseInvoiceModule'
 import TallySyncModule from './modules/TallySyncModule'
 import SettingsModule from './modules/SettingsModule'
 import AnalyticsModule from './modules/AnalyticsModule'
-import TypeModule from './modules/TypeModule'
 import AccountsModule from './modules/AccountsModule'
 import CropPurchaseModule from './modules/CropPurchaseModule'
 import EntriesModule from './modules/EntriesModule'
 
-type Page = 'dashboard' | 'customers' | 'suppliers' | 'products' | 'sales_invoice' | 'purchase_invoice' | 'tally_sync' | 'settings' | 'analytics' | 'type' | 'accounts' | 'crop_purchase' | 'entries'
+type Page = 'dashboard' | 'customers' | 'suppliers' | 'products' | 'sales_invoice' | 'purchase_invoice' | 'tally_sync' | 'settings' | 'analytics' | 'accounts' | 'crop_purchase' | 'entries'
 
 const PAGE_TITLES: Record<Page, Record<Language, string>> = {
   dashboard: { en: 'Dashboard', kn: 'ಡ್ಯಾಶ್‌ಬೋರ್ಡ್' },
@@ -32,7 +31,6 @@ const PAGE_TITLES: Record<Page, Record<Language, string>> = {
   tally_sync: { en: 'Tally Sync', kn: 'ಟ್ಯಾಲಿ ಸಿಂಕ್' },
   settings: { en: 'Settings', kn: 'ಸೆಟ್ಟಿಂಗ್‌ಗಳು' },
   analytics: { en: 'Analytics', kn: 'ವಿಶ್ಲೇಷಣೆ' },
-  type: { en: 'Product Types', kn: 'ಉತ್ಪನ್ನ ಪ್ರಕಾರ' },
   accounts: { en: 'Accounts', kn: 'ಖಾತೆಗಳು' },
   crop_purchase: { en: 'Crop Purchase', kn: 'ಕ್ರಾಪ್ ಖರೀದಿ' },
   entries: { en: 'Entries', kn: 'ನಮೂದುಗಳು' },
@@ -81,8 +79,6 @@ export default function AppLayout() {
         return <SettingsModule {...commonProps} onLanguageChange={handleLanguageChange} />
       case 'analytics':
         return <AnalyticsModule {...commonProps} />
-      case 'type':
-        return <TypeModule {...commonProps} />
       case 'accounts':
         return <AccountsModule {...commonProps} />
       case 'crop_purchase':
