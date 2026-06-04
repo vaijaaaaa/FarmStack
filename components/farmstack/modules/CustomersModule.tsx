@@ -14,6 +14,8 @@ export default function CustomersModule({ language }: CustomersModuleProps) {
   const [view, setView] = useState<View>('history')
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [showBulkUpload, setShowBulkUpload] = useState(false)
+  // Bumped after a bulk upload to force the history list to re-mount + refetch.
+  const [reloadKey, setReloadKey] = useState(0)
 
   const handleAddCustomer = () => {
     setEditingCustomer(null)
@@ -59,6 +61,7 @@ export default function CustomersModule({ language }: CustomersModuleProps) {
   return (
     <>
       <CustomerHistoryPage
+        key={reloadKey}
         language={language}
         onAddCustomer={handleAddCustomer}
         onEditCustomer={handleEditCustomer}
@@ -71,6 +74,7 @@ export default function CustomersModule({ language }: CustomersModuleProps) {
         onSuccess={() => {
           setShowBulkUpload(false)
           setView('history')
+          setReloadKey((k) => k + 1)
         }}
       />
     </>

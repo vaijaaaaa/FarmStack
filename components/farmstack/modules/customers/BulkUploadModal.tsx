@@ -187,7 +187,12 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
         (skipped > 0 ? `, ${skipped} duplicate/empty skipped` : '') +
         (failCount > 0 ? `, ${failCount} failed` : ''),
     )
-    onSuccess()
+    // Leave the modal only on a real success; keep it open (with the data) on
+    // total failure so the user can fix and retry.
+    if (successCount > 0) {
+      onSuccess()
+      onClose()
+    }
   }
 
   if (!isOpen) return null

@@ -18,6 +18,8 @@ export default function ProductsModule({ language }: ProductsModuleProps) {
   const [currentPage, setCurrentPage] = useState<Page>('history')
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [showBulkUpload, setShowBulkUpload] = useState(false)
+  // Bumped after a bulk upload to force the history list to re-mount + refetch.
+  const [reloadKey, setReloadKey] = useState(0)
 
   const handleAddProduct = () => {
     setEditingProduct(null)
@@ -37,12 +39,14 @@ export default function ProductsModule({ language }: ProductsModuleProps) {
   const handleSuccess = () => {
     setCurrentPage('history')
     setEditingProduct(null)
+    setReloadKey((k) => k + 1)
   }
 
   return (
     <div>
       {currentPage === 'history' && (
         <ProductHistoryPage
+          key={reloadKey}
           language={language}
           onAddProduct={handleAddProduct}
           onEditProduct={handleEditProduct}

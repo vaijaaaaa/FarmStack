@@ -18,6 +18,8 @@ export default function SuppliersModule({ language }: SuppliersModuleProps) {
   const [currentPage, setCurrentPage] = useState<Page>('history')
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
   const [showBulkUpload, setShowBulkUpload] = useState(false)
+  // Bumped after a bulk upload to force the history list to re-mount + refetch.
+  const [reloadKey, setReloadKey] = useState(0)
 
   const handleAddSupplier = () => {
     setEditingSupplier(null)
@@ -37,12 +39,14 @@ export default function SuppliersModule({ language }: SuppliersModuleProps) {
   const handleSuccess = () => {
     setCurrentPage('history')
     setEditingSupplier(null)
+    setReloadKey((k) => k + 1)
   }
 
   return (
     <div>
       {currentPage === 'history' && (
         <SupplierHistoryPage
+          key={reloadKey}
           language={language}
           onAddSupplier={handleAddSupplier}
           onEditSupplier={handleEditSupplier}
