@@ -5,6 +5,7 @@ import { Language } from '@/types/farmstack'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { BarChart2, TrendingDown, AlertTriangle, Package } from 'lucide-react'
 import ProductSaleQtyTab from './analytics/ProductSaleQtyTab'
+import RunRateTab from './analytics/RunRateTab'
 import NearExpiryTab from './analytics/NearExpiryTab'
 import StockTab from './analytics/StockTab'
 
@@ -97,14 +98,7 @@ export default function AnalyticsModule({ language }: AnalyticsModuleProps) {
         </TabsContent>
 
         <TabsContent value="run-rate">
-          <div className="mt-4 rounded-xl border border-gray-200 bg-white p-12 text-center">
-            <TrendingDown className="mx-auto mb-3 h-10 w-10 text-gray-200" />
-            <h2 className="text-base font-semibold text-gray-700">Run Rate</h2>
-            <p className="mt-1 text-sm text-gray-400">
-              Products that will go out of stock within 10 days
-            </p>
-            <p className="mt-4 text-xs text-gray-300">Coming soon</p>
-          </div>
+          <RunRateTab />
         </TabsContent>
 
         <TabsContent value="near-expiry">
