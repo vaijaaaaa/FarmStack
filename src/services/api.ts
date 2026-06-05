@@ -1,5 +1,5 @@
 // Thin client for the API routes.
-import type { Customer, Supplier, Product, ProductType, SalesInvoice } from '@/types/farmstack'
+import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season } from '@/types/farmstack'
 
 // The Tally server URL the user configured (their localhost, or a tunnel URL).
 // Stored in the browser and sent on every request so the server posts to the
@@ -41,6 +41,12 @@ export const customerApi = {
       '/api/customers/bulk',
       { method: 'POST', body: JSON.stringify({ customers }) },
     ),
+}
+
+export const seasonApi = {
+  list: () => request<Season[]>('/api/seasons'),
+  create: (payload: Partial<Season>) =>
+    request<Season>('/api/seasons', { method: 'POST', body: JSON.stringify(payload) }),
 }
 
 export const supplierApi = {

@@ -1,55 +1,112 @@
 'use client'
 
+import { useEffect, useRef, useState } from 'react'
 import { Language } from '@/types/farmstack'
-import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { CalendarDays, UserPlus, Eye, Lock } from 'lucide-react'
+import { useSeasons } from '@/hooks/useDatabase'
+import SeasonsTab from './accounts/SeasonsTab'
+import LedgerAddingTab from './accounts/LedgerAddingTab'
+import LedgerViewTab from './accounts/LedgerViewTab'
+import { SEED_LEDGERS, type Ledger, type LedgerLine } from './accounts/data'
 
 interface AccountsModuleProps {
   language: Language
 }
 
+const TABS = [
+  { value: 'season', label: 'Season', shortcut: '1', icon: CalendarDays },
+  { value: 'ledger-adding', label: 'Ledger Adding', shortcut: '2', icon: UserPlus },
+  { value: 'ledger-display', label: 'Ledger Display', shortcut: '3', icon: Eye },
+  { value: 'ledger-closure', label: 'Ledger Closure', shortcut: '4', icon: Lock },
+] as const
+
+let idSeq = 0
+const uid = (p: string) => `${p}-${Date.now()}-${idSeq++}`
+
 export default function AccountsModule({ language }: AccountsModuleProps) {
-  const accounts = [
-    { id: 1, name: 'Petty Cash', type: 'Cash', balance: '₹5,000' },
-    { id: 2, name: 'Bank Account - HDFC', type: 'Bank', balance: '₹50,000' },
-    { id: 3, name: 'Payables', type: 'Liability', balance: '₹12,000' },
-    { id: 4, name: 'Receivables', type: 'Asset', balance: '₹25,000' },
-  ]
+  const tabsRef = useRef<HTMLDivElement>(null)
+  const { seasons, loading: seasonsLoading, createSeason } = useSeasons()
+  const [ledgers, setLedgers] = useState<Ledger[]>(SEED_LEDGERS)
+
+  // Number-key tab shortcuts (same UX as AnalyticsModule)
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      const tab = TABS.find((t) => t.shortcut === e.key)
+      if (!tab) return
+      const trigger = tabsRef.current?.querySelector<HTMLButtonElement>(`[data-value="${tab.value}"]`)
+      trigger?.click()
+      trigger?.focus()
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [])
+
+  const addSeason = async (name: string, description: string) => {
+    await createSeason({ name, description })
+  }
+
+  const addLedger = (l: Omit<Ledger, 'id' | 'lines' | 'status'>) =>
+    setLedgers((prev) => [...prev, { ...l, id: uid('l'), lines: [], status: 'open' }])
+
+  const addEntry = (ledgerId: string, line: Omit<LedgerLine, 'id' | 'kind'>) =>
+    setLedgers((prev) =>
+      prev.map((l) =>
+        l.id === ledgerId ? { ...l, lines: [...l.lines, { ...line, id: uid('ln'), kind: 'entry' }] } : l,
+      ),
+    )
+
+  const closeLedger = (ledgerId: string, closureDate: string) =>
+    setLedgers((prev) => prev.map((l) => (l.id === ledgerId ? { ...l, status: 'closed', closureDate } : l)))
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-black">Accounts</h1>
-          <p className="mt-2 text-gray-600">Manage all accounts and balances</p>
-        </div>
-        <Button className="bg-black text-white hover:bg-gray-900">Add Account</Button>
+    // Pull back the p-8 from AppLayout so this page owns its full viewport height
+    <div className="-m-8 flex h-[calc(100vh-56px)] flex-col">
+      {/* ── Header strip ─────────────────────────────────────────────── */}
+      <div className="px-8 pt-5 pb-3">
+        <h1 className="text-2xl font-bold text-black">Accounts</h1>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-        <table className="w-full">
-          <thead className="border-b border-gray-200 bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Account Name</th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Type</th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Balance</th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {accounts.map((account) => (
-              <tr key={account.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 text-sm font-medium text-black">{account.name}</td>
-                <td className="px-6 py-4 text-sm text-gray-600">{account.type}</td>
-                <td className="px-6 py-4 text-sm font-semibold text-black">{account.balance}</td>
-                <td className="px-6 py-4 text-sm">
-                  <button className="text-blue-600 hover:text-blue-800 mr-3">View</button>
-                  <button className="text-blue-600 hover:text-blue-800">Edit</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* ── Tabs fill remaining height ────────────────────────────────── */}
+      <Tabs defaultValue="season" ref={tabsRef as any} className="flex min-h-0 flex-1 flex-col px-8 pb-5">
+        <TabsList className="h-auto w-full shrink-0 justify-start gap-1 rounded-xl bg-gray-100 p-1">
+          {TABS.map((tab) => {
+            const Icon = tab.icon
+            return (
+              <TabsTrigger
+                key={tab.value}
+                value={tab.value}
+                data-value={tab.value}
+                className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium data-[state=active]:bg-white data-[state=active]:shadow-none"
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span>{tab.label}</span>
+                <kbd className="ml-1 rounded border border-gray-300 bg-gray-50 px-1.5 py-0.5 font-mono text-[10px] text-gray-400">
+                  {tab.shortcut}
+                </kbd>
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
+
+        <TabsContent value="season" className="min-h-0 flex-1 overflow-auto">
+          <SeasonsTab seasons={seasons} loading={seasonsLoading} onAdd={addSeason} />
+        </TabsContent>
+
+        <TabsContent value="ledger-adding" className="min-h-0 flex-1 overflow-hidden">
+          <LedgerAddingTab seasons={seasons} onAddLedger={addLedger} />
+        </TabsContent>
+
+        <TabsContent value="ledger-display" className="min-h-0 flex-1 overflow-auto">
+          <LedgerViewTab mode="display" seasons={seasons} ledgers={ledgers} onAddEntry={addEntry} onClose={closeLedger} />
+        </TabsContent>
+
+        <TabsContent value="ledger-closure" className="min-h-0 flex-1 overflow-auto">
+          <LedgerViewTab mode="closure" seasons={seasons} ledgers={ledgers} onAddEntry={addEntry} onClose={closeLedger} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

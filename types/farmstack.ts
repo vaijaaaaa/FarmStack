@@ -1,6 +1,13 @@
 export type Language = 'en' | 'kn'
 export type UserRole = 'user' | 'admin'
 
+export interface Season {
+  id: string
+  name: string
+  description: string
+  created_at?: string
+}
+
 export interface TallyMasterFields {
   tally_sync_status?: string
   tally_response?: string | null

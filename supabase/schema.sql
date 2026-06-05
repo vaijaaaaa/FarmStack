@@ -153,6 +153,15 @@ CREATE TABLE IF NOT EXISTS purchase_items (
   unit TEXT DEFAULT ''
 );
 
+-- Accounts module: a season is a named period (e.g. "2026 Dalwa").
+-- name/description are optional (not mandatory) so both default to ''.
+CREATE TABLE IF NOT EXISTS seasons (
+  id TEXT PRIMARY KEY,
+  name TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sales_items_invoice ON sales_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_items_invoice ON purchase_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_sales_invoices_created ON sales_invoices(created_at DESC);

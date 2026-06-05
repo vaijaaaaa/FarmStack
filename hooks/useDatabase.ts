@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import type { Customer, Supplier, Product, ProductType, SalesInvoice } from '@/types/farmstack'
+import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season } from '@/types/farmstack'
 import {
   customerApi,
   supplierApi,
@@ -9,6 +9,7 @@ import {
   productTypeApi,
   salesApi,
   purchaseApi,
+  seasonApi,
   type PurchaseHistoryRow,
 } from '@/src/services/api'
 
@@ -55,6 +56,15 @@ export function useCustomers() {
     Customer
   >(customerApi.list, customerApi.create)
   return { customers: data, loading, error, refresh, createCustomer: add }
+}
+
+export function useSeasons() {
+  const { data, loading, error, refresh, add } = useCollection<
+    Season,
+    Partial<Season>,
+    Season
+  >(seasonApi.list, seasonApi.create)
+  return { seasons: data, loading, error, refresh, createSeason: add }
 }
 
 export function useSuppliers() {
