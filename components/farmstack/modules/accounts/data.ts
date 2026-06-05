@@ -1,77 +1,105 @@
-// Local types + seed data for the Accounts (season-based customer ledger) UI.
-// This is a front-end design pass — data lives in component state for now and will
-// be replaced by real API/DB calls later. Full spec: /accounts.md
-// NOTE: the "User" field is a placeholder pending the Account-vs-User clarification.
+// Types + helpers for the Accounts (season-based customer ledger) module.
+// Ledger records live in the DB (LedgerRecord); the ledger *lines* shown on the
+// Display/Closure screens are composed on the fly from sales (debits) + entries
+// (cash = credit / credit = debit) + the carried opening balance.
+import type { LedgerRecord, SalesInvoice, Entry } from '@/types/farmstack'
 
-export type { Season } from '@/types/farmstack'
+export type { Season, LedgerRecord } from '@/types/farmstack'
 
-export type LineKind = 'ob' | 'bill' | 'entry'
+export type LineKind = 'ob' | 'sale' | 'cash' | 'credit'
 export type DrCr = 'debit' | 'credit'
 
 export interface LedgerLine {
   id: string
-  date: string // dd-mm-yy as shown in the old software
+  date: string // ISO YYYY-MM-DD, or '' for the opening balance
   kind: LineKind
   drcr: DrCr
   description: string
   amount: number
+  sale?: SalesInvoice // present on sale lines so the row can open a details popup
 }
 
-export interface Ledger {
-  id: string
-  seasonId: string
-  account: string // the party / customer (e.g. "M S R")
-  user: string // placeholder — meaning TBD
-  description: string
-  acres: number
-  creditLimit: number // the "Loyality" field
-  displayNumber: number
-  closureDate: string // '' until closed
-  status: 'open' | 'closed'
-  lines: LedgerLine[]
+// ── Date helpers ────────────────────────────────────────────────────────────
+// Sales/entry dates are stored as ISO (YYYY-MM-DD); be tolerant of dd-mm-yyyy too.
+export function parseLedgerDate(s: string): Date | null {
+  if (!s) return null
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]))
+  const dmy = s.match(/^(\d{2})-(\d{2})-(\d{2,4})$/)
+  if (dmy) {
+    const y = Number(dmy[3])
+    return new Date(y < 100 ? 2000 + y : y, Number(dmy[2]) - 1, Number(dmy[1]))
+  }
+  const t = Date.parse(s)
+  return Number.isNaN(t) ? null : new Date(t)
 }
 
-// Customers available to attach to a season (mirrors the names in the screenshots).
-export const SEED_CUSTOMERS = ['M S R', 'm prasad', 'HALESH', 'Rajesh', 'Suresh K']
+export function fmtDate(s: string): string {
+  const d = parseLedgerDate(s)
+  if (!d) return s || '—'
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${dd}-${mm}-${d.getFullYear()}`
+}
 
-// One fully-populated ledger mirroring the Display/Closure screenshots
-// (MSR in 2026 Dalwa: O.B credit 1,92,900 + four bills).
-export const SEED_LEDGERS: Ledger[] = [
-  {
-    id: 'l-msr-2026-dalwa',
-    seasonId: 's-2026-dalwa',
-    account: 'M S R',
-    user: '',
-    description: 'M S R',
-    acres: 12,
-    creditLimit: 50000,
-    displayNumber: 1,
-    closureDate: '',
-    status: 'open',
-    lines: [
-      { id: 'ln1', date: '06-12-25', kind: 'ob', drcr: 'credit', description: 'CREDIT : BNKL : O.B', amount: 192900 },
-      { id: 'ln2', date: '13-12-25', kind: 'bill', drcr: 'debit', description: 'BILL : BNKL : m prasad', amount: 1930 },
-      { id: 'ln3', date: '16-12-25', kind: 'bill', drcr: 'debit', description: 'BILL : BNKL : m prasad', amount: 3770 },
-      { id: 'ln4', date: '21-12-25', kind: 'bill', drcr: 'debit', description: 'BILL : BNKL : HALESH', amount: 4650 },
-      { id: 'ln5', date: '22-12-25', kind: 'bill', drcr: 'debit', description: 'BILL : BNKL : m prasad', amount: 5920 },
-    ],
-  },
-  {
-    id: 'l-prasad-2026-dalwa',
-    seasonId: 's-2026-dalwa',
-    account: 'm prasad',
-    user: '',
-    description: 'm prasad',
-    acres: 6,
-    creditLimit: 25000,
-    displayNumber: 2,
-    closureDate: '',
-    status: 'open',
-    lines: [
-      { id: 'lp1', date: '10-12-25', kind: 'bill', drcr: 'debit', description: 'BILL : BNKL : self', amount: 8200 },
-    ],
-  },
-]
+// Compose the ledger lines for one customer-in-a-season from sales + entries.
+export function buildLedgerLines(
+  ledger: LedgerRecord,
+  sales: SalesInvoice[],
+  entries: Entry[],
+): LedgerLine[] {
+  const lines: LedgerLine[] = []
+
+  // Opening balance carried from a prior season's closure.
+  if (ledger.opening_balance && ledger.opening_balance !== 0) {
+    const isCredit = ledger.opening_balance < 0
+    lines.push({
+      id: `ob-${ledger.id}`,
+      date: '',
+      kind: 'ob',
+      drcr: isCredit ? 'credit' : 'debit',
+      description: 'Opening Balance',
+      amount: Math.abs(ledger.opening_balance),
+    })
+  }
+
+  // Sales for this customer → debits (customer owes for goods bought).
+  for (const s of sales) {
+    if (s.customer_id !== ledger.customer_id) continue
+    lines.push({
+      id: `sale-${s.id}`,
+      date: s.date || s.created_at || '',
+      kind: 'sale',
+      drcr: 'debit',
+      description: `Sales made${s.invoice_number ? ` · ${s.invoice_number}` : ''}`,
+      amount: Number(s.total) || 0,
+      sale: s,
+    })
+  }
+
+  // Entries for this customer in this season → cash = credit, credit = debit.
+  for (const e of entries) {
+    if (e.customer_id !== ledger.customer_id || e.season_id !== ledger.season_id) continue
+    const isCash = e.type === 'cash'
+    lines.push({
+      id: `entry-${e.id}`,
+      date: e.date || '',
+      kind: isCash ? 'cash' : 'credit',
+      drcr: isCash ? 'credit' : 'debit',
+      description: `${isCash ? 'Cash' : 'Credit'} entry${e.comments ? ` · ${e.comments}` : ''}`,
+      amount: Number(e.amount) || 0,
+    })
+  }
+
+  // Chronological; opening balance (no date) stays first.
+  lines.sort((a, b) => {
+    const da = parseLedgerDate(a.date)?.getTime() ?? -Infinity
+    const db = parseLedgerDate(b.date)?.getTime() ?? -Infinity
+    return da - db
+  })
+
+  return lines
+}
 
 export function totalsFor(lines: LedgerLine[]) {
   const debit = lines.filter((l) => l.drcr === 'debit').reduce((s, l) => s + l.amount, 0)

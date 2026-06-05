@@ -178,9 +178,32 @@ CREATE TABLE IF NOT EXISTS entries (
   created_at TEXT NOT NULL
 );
 
+-- Ledgers: a customer attached to a season (the "Ledger Adding" record). One
+-- row per (season, customer). Sales (debits) + entries (cash=credit/credit=debit)
+-- for that customer flow into this ledger; opening_balance carries from a prior
+-- season's closure. status is 'open' or 'closed'.
+CREATE TABLE IF NOT EXISTS ledgers (
+  id TEXT PRIMARY KEY,
+  season_id TEXT REFERENCES seasons(id),
+  customer_id TEXT REFERENCES customers(id),
+  customer_name TEXT DEFAULT '',
+  user_name TEXT DEFAULT '',
+  description TEXT DEFAULT '',
+  acres REAL DEFAULT 0,
+  credit_limit REAL DEFAULT 0,
+  display_number INTEGER DEFAULT 0,
+  closure_date TEXT DEFAULT '',
+  opening_balance REAL DEFAULT 0,
+  status TEXT DEFAULT 'open',
+  created_at TEXT NOT NULL,
+  UNIQUE (season_id, customer_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sales_items_invoice ON sales_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_items_invoice ON purchase_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_sales_invoices_created ON sales_invoices(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_purchase_invoices_created ON purchase_invoices(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_entries_season ON entries(season_id);
 CREATE INDEX IF NOT EXISTS idx_entries_customer ON entries(customer_id);
+CREATE INDEX IF NOT EXISTS idx_ledgers_season ON ledgers(season_id);
+CREATE INDEX IF NOT EXISTS idx_ledgers_customer ON ledgers(customer_id);

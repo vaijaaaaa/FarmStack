@@ -25,6 +25,25 @@ export interface Entry {
   created_at?: string
 }
 
+// A customer attached to a season (the "Ledger Adding" record). Sales + entries
+// for this customer flow into this ledger; opening_balance carries from a prior
+// season's closure.
+export interface LedgerRecord {
+  id: string
+  season_id: string
+  customer_id: string
+  customer_name: string
+  user_name: string
+  description: string
+  acres: number
+  credit_limit: number
+  display_number: number
+  closure_date: string
+  opening_balance: number
+  status: 'open' | 'closed'
+  created_at?: string
+}
+
 export interface TallyMasterFields {
   tally_sync_status?: string
   tally_response?: string | null

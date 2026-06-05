@@ -1,14 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { Language } from '@/types/farmstack'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { CalendarDays, UserPlus, Eye, Lock } from 'lucide-react'
-import { useSeasons } from '@/hooks/useDatabase'
+import { useSeasons, useLedgers } from '@/hooks/useDatabase'
 import SeasonsTab from './accounts/SeasonsTab'
 import LedgerAddingTab from './accounts/LedgerAddingTab'
 import LedgerViewTab from './accounts/LedgerViewTab'
-import { SEED_LEDGERS, type Ledger, type LedgerLine } from './accounts/data'
 
 interface AccountsModuleProps {
   language: Language
@@ -21,13 +20,10 @@ const TABS = [
   { value: 'ledger-closure', label: 'Ledger Closure', shortcut: '4', icon: Lock },
 ] as const
 
-let idSeq = 0
-const uid = (p: string) => `${p}-${Date.now()}-${idSeq++}`
-
 export default function AccountsModule({ language }: AccountsModuleProps) {
   const tabsRef = useRef<HTMLDivElement>(null)
   const { seasons, loading: seasonsLoading, createSeason } = useSeasons()
-  const [ledgers, setLedgers] = useState<Ledger[]>(SEED_LEDGERS)
+  const { ledgers, createLedger, closeLedger, refresh: refreshLedgers } = useLedgers()
 
   // Number-key tab shortcuts (same UX as AnalyticsModule)
   useEffect(() => {
@@ -47,19 +43,6 @@ export default function AccountsModule({ language }: AccountsModuleProps) {
   const addSeason = async (name: string, description: string) => {
     await createSeason({ name, description })
   }
-
-  const addLedger = (l: Omit<Ledger, 'id' | 'lines' | 'status'>) =>
-    setLedgers((prev) => [...prev, { ...l, id: uid('l'), lines: [], status: 'open' }])
-
-  const addEntry = (ledgerId: string, line: Omit<LedgerLine, 'id' | 'kind'>) =>
-    setLedgers((prev) =>
-      prev.map((l) =>
-        l.id === ledgerId ? { ...l, lines: [...l.lines, { ...line, id: uid('ln'), kind: 'entry' }] } : l,
-      ),
-    )
-
-  const closeLedger = (ledgerId: string, closureDate: string) =>
-    setLedgers((prev) => prev.map((l) => (l.id === ledgerId ? { ...l, status: 'closed', closureDate } : l)))
 
   return (
     // Pull back the p-8 from AppLayout so this page owns its full viewport height
@@ -96,15 +79,23 @@ export default function AccountsModule({ language }: AccountsModuleProps) {
         </TabsContent>
 
         <TabsContent value="ledger-adding" className="min-h-0 flex-1 overflow-hidden">
-          <LedgerAddingTab seasons={seasons} onAddLedger={addLedger} />
+          <LedgerAddingTab seasons={seasons} onAdd={createLedger} />
         </TabsContent>
 
         <TabsContent value="ledger-display" className="min-h-0 flex-1 overflow-auto">
-          <LedgerViewTab mode="display" seasons={seasons} ledgers={ledgers} onAddEntry={addEntry} onClose={closeLedger} />
+          <LedgerViewTab mode="display" seasons={seasons} ledgers={ledgers} />
         </TabsContent>
 
         <TabsContent value="ledger-closure" className="min-h-0 flex-1 overflow-auto">
-          <LedgerViewTab mode="closure" seasons={seasons} ledgers={ledgers} onAddEntry={addEntry} onClose={closeLedger} />
+          <LedgerViewTab
+            mode="closure"
+            seasons={seasons}
+            ledgers={ledgers}
+            onClose={async (id, date) => {
+              await closeLedger(id, date)
+              await refreshLedgers()
+            }}
+          />
         </TabsContent>
       </Tabs>
     </div>

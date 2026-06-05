@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season, Entry } from '@/types/farmstack'
+import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season, Entry, LedgerRecord } from '@/types/farmstack'
 import {
   customerApi,
   supplierApi,
@@ -11,6 +11,7 @@ import {
   purchaseApi,
   seasonApi,
   entriesApi,
+  ledgerApi,
   type PurchaseHistoryRow,
   type CreateEntriesPayload,
 } from '@/src/services/api'
@@ -100,6 +101,48 @@ export function useEntries() {
   )
 
   return { entries, loading, error, refresh, createEntries }
+}
+
+export function useLedgers() {
+  const [ledgers, setLedgers] = useState<LedgerRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      setLedgers(await ledgerApi.list())
+      setError(null)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const createLedger = useCallback(
+    async (payload: Partial<LedgerRecord>) => {
+      const created = await ledgerApi.create(payload)
+      await refresh()
+      return created
+    },
+    [refresh],
+  )
+
+  const closeLedger = useCallback(
+    async (id: string, closureDate: string) => {
+      const res = await ledgerApi.close(id, closureDate)
+      await refresh()
+      return res
+    },
+    [refresh],
+  )
+
+  return { ledgers, loading, error, refresh, createLedger, closeLedger }
 }
 
 export function useSuppliers() {

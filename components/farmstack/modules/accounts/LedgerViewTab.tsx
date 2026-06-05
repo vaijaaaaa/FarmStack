@@ -2,59 +2,82 @@
 
 import { useMemo, useState } from 'react'
 import { Plus, Lock, X, Calculator, BookOpen } from 'lucide-react'
-import { totalsFor, inr, type Season, type Ledger, type LedgerLine, type DrCr } from './data'
+import { useSalesInvoices, useEntries, useProducts } from '@/hooks/useDatabase'
+import type { LedgerRecord, Season, SalesInvoice, EntryType } from '@/types/farmstack'
+import {
+  buildLedgerLines,
+  totalsFor,
+  inr,
+  fmtDate,
+  parseLedgerDate,
+  type LedgerLine,
+  type LineKind,
+} from './data'
 
 interface LedgerViewTabProps {
   mode: 'display' | 'closure'
   seasons: Season[]
-  ledgers: Ledger[]
-  onAddEntry: (ledgerId: string, line: Omit<LedgerLine, 'id' | 'kind'>) => void
-  onClose: (ledgerId: string, closureDate: string) => void
+  ledgers: LedgerRecord[]
+  onClose?: (ledgerId: string, closureDate: string) => Promise<void> | void
 }
 
 type OptionFilter = 'all' | 'debit' | 'credit'
 
-// dd-mm-yy → Date
-function parseDate(s: string): Date | null {
-  const m = s.match(/^(\d{2})-(\d{2})-(\d{2})$/)
-  if (!m) return null
-  return new Date(2000 + Number(m[3]), Number(m[2]) - 1, Number(m[1]))
+const today = () => new Date().toISOString().slice(0, 10)
+
+// Colored badge per line kind (sales = green, per the ledger spec).
+const KIND_BADGE: Record<LineKind, { label: string; cls: string }> = {
+  ob: { label: 'O.B', cls: 'bg-gray-100 text-gray-600' },
+  sale: { label: 'Sales', cls: 'bg-green-100 text-green-700' },
+  cash: { label: 'Cash', cls: 'bg-sky-100 text-sky-700' },
+  credit: { label: 'Credit', cls: 'bg-amber-100 text-amber-700' },
 }
 
-export default function LedgerViewTab({ mode, seasons, ledgers, onAddEntry, onClose }: LedgerViewTabProps) {
+export default function LedgerViewTab({ mode, seasons, ledgers, onClose }: LedgerViewTabProps) {
   const closing = mode === 'closure'
+
+  const { invoices } = useSalesInvoices()
+  const { entries, createEntries } = useEntries()
+  const { products } = useProducts()
 
   const [seasonId, setSeasonId] = useState('')
   const [ledgerId, setLedgerId] = useState('')
   const [option, setOption] = useState<OptionFilter>('all')
-  const [closureDate, setClosureDate] = useState('')
+  const [closureDate, setClosureDate] = useState(today())
   const [debitRate, setDebitRate] = useState('2')
   const [creditRate, setCreditRate] = useState('1')
   const [interest, setInterest] = useState<Record<string, { interest: number; days: number }>>({})
   const [showEntry, setShowEntry] = useState(false)
+  const [saleDetail, setSaleDetail] = useState<SalesInvoice | null>(null)
 
-  const seasonLedgers = useMemo(() => ledgers.filter((l) => l.seasonId === seasonId), [ledgers, seasonId])
-  const ledger = ledgers.find((l) => l.id === ledgerId && l.seasonId === seasonId) ?? null
+  const seasonLedgers = useMemo(
+    () => ledgers.filter((l) => l.season_id === seasonId),
+    [ledgers, seasonId],
+  )
+  const ledger = ledgers.find((l) => l.id === ledgerId && l.season_id === seasonId) ?? null
 
-  const { debit, credit, grand } = ledger ? totalsFor(ledger.lines) : { debit: 0, credit: 0, grand: 0 }
+  const lines = useMemo(
+    () => (ledger ? buildLedgerLines(ledger, invoices, entries) : []),
+    [ledger, invoices, entries],
+  )
+
+  const { debit, credit, grand } = totalsFor(lines)
 
   const visibleLines = useMemo(() => {
-    if (!ledger) return []
-    if (option === 'all') return ledger.lines
-    return ledger.lines.filter((l) => l.drcr === option)
-  }, [ledger, option])
+    if (option === 'all') return lines
+    return lines.filter((l) => l.drcr === option)
+  }, [lines, option])
 
   const totalInterest = Object.values(interest).reduce((s, v) => s + v.interest, 0)
 
   const calculate = () => {
-    if (!ledger) return
-    const close = parseDate(closureDate)
+    const close = parseLedgerDate(closureDate)
     if (!close) return
     const dr = Number(debitRate) || 0
     const cr = Number(creditRate) || 0
     const next: Record<string, { interest: number; days: number }> = {}
-    for (const l of ledger.lines) {
-      const d = parseDate(l.date)
+    for (const l of lines) {
+      const d = parseLedgerDate(l.date)
       if (!d) continue
       const days = Math.max(0, Math.round((close.getTime() - d.getTime()) / 86400000))
       const rate = l.drcr === 'debit' ? dr : cr
@@ -64,15 +87,20 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onAddEntry, onCl
     setInterest(next)
   }
 
+  const selectSeason = (id: string) => {
+    setSeasonId(id)
+    setLedgerId('')
+    setInterest({})
+  }
+
   return (
     <div className="mt-4">
       {/* ── Pickers ───────────────────────────────────────────────────── */}
       <div className="mb-5 flex flex-wrap items-end gap-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500">Season</label>
+        <Picker label="Season">
           <select
             value={seasonId}
-            onChange={(e) => { setSeasonId(e.target.value); setLedgerId(''); setInterest({}) }}
+            onChange={(e) => selectSeason(e.target.value)}
             className="w-52 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
           >
             <option value="">— Select season —</option>
@@ -80,10 +108,9 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onAddEntry, onCl
               <option key={s.id} value={s.id}>{s.name || s.description || '(untitled)'}</option>
             ))}
           </select>
-        </div>
+        </Picker>
 
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500">Account</label>
+        <Picker label="Account">
           <select
             value={ledgerId}
             onChange={(e) => { setLedgerId(e.target.value); setInterest({}) }}
@@ -92,39 +119,43 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onAddEntry, onCl
           >
             <option value="">— Select account —</option>
             {seasonLedgers.map((l) => (
-              <option key={l.id} value={l.id}>{l.account}</option>
+              <option key={l.id} value={l.id}>{l.customer_name}</option>
             ))}
           </select>
-        </div>
+        </Picker>
 
         {ledger && (
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500">Option</label>
-            <select value={option} onChange={(e) => setOption(e.target.value as OptionFilter)} className="w-32 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black">
+          <Picker label="Option">
+            <select
+              value={option}
+              onChange={(e) => setOption(e.target.value as OptionFilter)}
+              className="w-32 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+            >
               <option value="all">All</option>
               <option value="debit">Debit</option>
               <option value="credit">Credit</option>
             </select>
-          </div>
+          </Picker>
         )}
 
         {ledger && !closing && (
-          <button onClick={() => setShowEntry(true)} className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-gray-400">
+          <button
+            onClick={() => setShowEntry(true)}
+            className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-gray-400"
+          >
             <Plus className="h-4 w-4" /> Add Entry
           </button>
         )}
 
         {ledger && closing && (
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500">Closure Date</label>
+          <Picker label="Closure Date">
             <input
-              type="text"
+              type="date"
               value={closureDate}
               onChange={(e) => setClosureDate(e.target.value)}
-              placeholder="dd-mm-yy"
-              className="w-28 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+              className="w-40 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
             />
-          </div>
+          </Picker>
         )}
       </div>
 
@@ -132,7 +163,9 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onAddEntry, onCl
       {!ledger ? (
         <div className="rounded-xl border border-gray-200 bg-white p-12 text-center">
           <BookOpen className="mx-auto mb-3 h-8 w-8 text-gray-200" />
-          <p className="text-sm text-gray-400">Select a season and account to {closing ? 'close' : 'view'} the ledger</p>
+          <p className="text-sm text-gray-400">
+            Select a season and account to {closing ? 'close' : 'view'} the ledger
+          </p>
         </div>
       ) : (
         <>
@@ -140,7 +173,11 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onAddEntry, onCl
           <div className="mb-4 flex flex-wrap items-end gap-4">
             <Stat label="Debit" value={`₹${inr(debit)}`} />
             <Stat label="Credit" value={`₹${inr(credit)}`} />
-            <Stat label="Grand Total" value={`₹${inr(Math.abs(grand))} ${grand < 0 ? 'Cr' : 'Dr'}`} accent={grand < 0 ? 'green' : 'default'} />
+            <Stat
+              label="Grand Total"
+              value={`₹${inr(Math.abs(grand))} ${grand < 0 ? 'Cr' : 'Dr'}`}
+              accent={grand < 0 ? 'green' : 'default'}
+            />
             {closing && <Stat label="Grand Interest" value={`₹${inr(totalInterest)}`} />}
           </div>
 
@@ -150,11 +187,14 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onAddEntry, onCl
               <span className="text-sm font-semibold text-amber-800">Accrual Interest</span>
               <RateField label="Debit %" value={debitRate} onChange={setDebitRate} basis="Days / 365" />
               <RateField label="Credit %" value={creditRate} onChange={setCreditRate} basis="Days / 360" />
-              <button onClick={calculate} className="flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700">
+              <button
+                onClick={calculate}
+                className="flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+              >
                 <Calculator className="h-4 w-4" /> Calculate
               </button>
               <button
-                onClick={() => closureDate && onClose(ledger.id, closureDate)}
+                onClick={() => onClose && closureDate && onClose(ledger.id, closureDate)}
                 disabled={!closureDate || ledger.status === 'closed'}
                 className="flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40"
               >
@@ -168,31 +208,51 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onAddEntry, onCl
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50 text-left">
-                  <th className="px-4 py-3 font-medium text-gray-500">Bill Date</th>
+                  <th className="w-32 px-4 py-3 font-medium text-gray-500">Date</th>
                   <th className="px-4 py-3 font-medium text-gray-500">Bill Description</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-500">Amount</th>
-                  {closing && <th className="px-4 py-3 text-right font-medium text-gray-500">Days</th>}
-                  {closing && <th className="px-4 py-3 text-right font-medium text-gray-500">Interest</th>}
+                  <th className="w-40 px-4 py-3 text-right font-medium text-gray-500">Amount</th>
+                  {closing && <th className="w-20 px-4 py-3 text-right font-medium text-gray-500">Days</th>}
+                  {closing && <th className="w-28 px-4 py-3 text-right font-medium text-gray-500">Interest</th>}
                 </tr>
               </thead>
               <tbody>
                 {visibleLines.length === 0 ? (
-                  <tr><td colSpan={closing ? 5 : 3} className="px-4 py-8 text-center text-sm text-gray-400">No lines</td></tr>
+                  <tr>
+                    <td colSpan={closing ? 5 : 3} className="px-4 py-10 text-center text-sm text-gray-400">
+                      No lines yet — make a sale or add an entry for this customer.
+                    </td>
+                  </tr>
                 ) : (
-                  visibleLines.map((l) => (
-                    <tr key={l.id} className={`border-b border-gray-50 last:border-0 hover:bg-gray-50 ${l.kind === 'ob' ? 'bg-amber-50/40' : ''}`}>
-                      <td className="px-4 py-3 text-gray-600">{l.date}</td>
-                      <td className="px-4 py-3 text-gray-700">
-                        {l.description}
-                        <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium ${l.drcr === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-                          {l.drcr === 'debit' ? 'Dr' : 'Cr'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-800">₹{inr(l.amount)}</td>
-                      {closing && <td className="px-4 py-3 text-right text-gray-500">{interest[l.id]?.days ?? '—'}</td>}
-                      {closing && <td className="px-4 py-3 text-right text-gray-600">₹{inr(interest[l.id]?.interest ?? 0)}</td>}
-                    </tr>
-                  ))
+                  visibleLines.map((l) => {
+                    const badge = KIND_BADGE[l.kind]
+                    const clickable = l.kind === 'sale' && l.sale
+                    return (
+                      <tr
+                        key={l.id}
+                        onClick={clickable ? () => setSaleDetail(l.sale!) : undefined}
+                        className={`border-b border-gray-50 last:border-0 ${
+                          clickable ? 'cursor-pointer hover:bg-green-50/40' : 'hover:bg-gray-50'
+                        } ${l.kind === 'ob' ? 'bg-amber-50/40' : ''}`}
+                      >
+                        <td className="px-4 py-3 text-gray-600">{fmtDate(l.date)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`mr-2 rounded px-1.5 py-0.5 text-[10px] font-semibold ${badge.cls}`}>
+                            {badge.label}
+                          </span>
+                          <span className="text-gray-700">{l.description}</span>
+                          {clickable && <span className="ml-2 text-[10px] text-green-600">view →</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="font-medium text-gray-900">₹{inr(l.amount)}</span>
+                          <span className={`ml-1.5 text-[10px] font-semibold ${l.drcr === 'debit' ? 'text-gray-500' : 'text-green-600'}`}>
+                            {l.drcr === 'debit' ? 'Dr' : 'Cr'}
+                          </span>
+                        </td>
+                        {closing && <td className="px-4 py-3 text-right text-gray-500">{interest[l.id]?.days ?? '—'}</td>}
+                        {closing && <td className="px-4 py-3 text-right text-gray-600">₹{inr(interest[l.id]?.interest ?? 0)}</td>}
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
               <tfoot>
@@ -212,21 +272,44 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onAddEntry, onCl
         </>
       )}
 
+      {/* Add Entry (cash/credit) — persists to this customer + season */}
       {showEntry && ledger && (
         <AddEntryModal
-          account={ledger.account}
+          account={ledger.customer_name}
           onClose={() => setShowEntry(false)}
-          onSave={(line) => {
-            onAddEntry(ledger.id, line)
+          onSave={async ({ type, date, amount, comments }) => {
+            await createEntries({
+              season_id: ledger.season_id,
+              type,
+              location: '',
+              rows: [
+                {
+                  customer_id: ledger.customer_id,
+                  customer_name: ledger.customer_name,
+                  date,
+                  amount,
+                  comments,
+                },
+              ],
+            })
             setShowEntry(false)
           }}
+        />
+      )}
+
+      {/* Sale details popup */}
+      {saleDetail && (
+        <SalesDetailModal
+          sale={saleDetail}
+          productName={(id) => products.find((p) => p.id === id)?.name ?? id}
+          onClose={() => setSaleDetail(null)}
         />
       )}
     </div>
   )
 }
 
-// ── Add Entry modal (the Entries-page credit/debit money) ──────────────
+// ── Add Entry modal ────────────────────────────────────────────────────────
 function AddEntryModal({
   account,
   onClose,
@@ -234,16 +317,27 @@ function AddEntryModal({
 }: {
   account: string
   onClose: () => void
-  onSave: (line: Omit<LedgerLine, 'id' | 'kind'>) => void
+  onSave: (v: { type: EntryType; date: string; amount: number; comments: string }) => Promise<void>
 }) {
-  const [drcr, setDrcr] = useState<DrCr>('credit')
-  const [date, setDate] = useState('')
-  const [description, setDescription] = useState('')
+  const [type, setType] = useState<EntryType>('cash')
+  const [date, setDate] = useState(today())
+  const [comments, setComments] = useState('')
   const [amount, setAmount] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    if (!amount) return
+    setSaving(true)
+    try {
+      await onSave({ type, date, amount: Number(amount), comments: comments.trim() })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white shadow-xl">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white">
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
           <h3 className="text-sm font-semibold text-gray-800">Add Entry · {account}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X className="h-4 w-4" /></button>
@@ -251,42 +345,135 @@ function AddEntryModal({
 
         <div className="space-y-4 p-5">
           <div className="flex gap-2">
-            {(['credit', 'debit'] as DrCr[]).map((v) => (
+            {(['cash', 'credit'] as EntryType[]).map((t) => (
               <button
-                key={v}
-                onClick={() => setDrcr(v)}
-                className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium capitalize ${drcr === v ? 'border-black bg-black text-white' : 'border-gray-300 bg-white text-gray-600'}`}
+                key={t}
+                onClick={() => setType(t)}
+                className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium capitalize ${
+                  type === t ? 'border-black bg-black text-white' : 'border-gray-300 bg-white text-gray-600'
+                }`}
               >
-                {v === 'credit' ? 'Credit (received)' : 'Debit (given)'}
+                {t === 'cash' ? 'Cash (received)' : 'Credit (given)'}
               </button>
             ))}
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500">Date</label>
-            <input value={date} onChange={(e) => setDate(e.target.value)} placeholder="dd-mm-yy" className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500">Description</label>
-            <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Cash received" className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-gray-500">Amount</label>
-            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black" />
-          </div>
+          <FieldRow label="Date">
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={modalInput} />
+          </FieldRow>
+          <FieldRow label="Amount">
+            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" className={modalInput} />
+          </FieldRow>
+          <FieldRow label="Comments">
+            <input value={comments} onChange={(e) => setComments(e.target.value)} placeholder="Optional note" className={modalInput} />
+          </FieldRow>
         </div>
 
         <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-4">
           <button onClick={onClose} className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-600 hover:border-gray-400">Cancel</button>
           <button
-            onClick={() => amount && onSave({ date: date || '—', drcr, description: description || (drcr === 'credit' ? 'Payment received' : 'Amount given'), amount: Number(amount) })}
-            disabled={!amount}
+            onClick={save}
+            disabled={!amount || saving}
             className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40"
           >
-            Add
+            {saving ? 'Adding…' : 'Add'}
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Sales detail popup ──────────────────────────────────────────────────────
+function SalesDetailModal({
+  sale,
+  productName,
+  onClose,
+}: {
+  sale: SalesInvoice
+  productName: (id: string) => string
+  onClose: () => void
+}) {
+  const items = sale.items ?? []
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg overflow-hidden rounded-xl border border-gray-200 bg-white">
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-800">
+              <span className="mr-2 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">Sales</span>
+              {sale.invoice_number || 'Sale'}
+            </h3>
+            <p className="mt-0.5 text-xs text-gray-400">
+              {fmtDate(sale.date || sale.created_at || '')} · {sale.customer_name || ''}
+              {sale.sale_type ? ` · ${sale.sale_type}` : ''}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="max-h-80 overflow-auto px-5 py-4">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 text-left text-xs text-gray-400">
+                <th className="py-2 font-medium">Product</th>
+                <th className="py-2 text-right font-medium">Qty</th>
+                <th className="py-2 text-right font-medium">Rate</th>
+                <th className="py-2 text-right font-medium">GST%</th>
+                <th className="py-2 text-right font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 ? (
+                <tr><td colSpan={5} className="py-6 text-center text-gray-400">No items</td></tr>
+              ) : (
+                items.map((it) => {
+                  const qty = Number(it.quantity) || 0
+                  const rate = Number(it.rate) || 0
+                  const gst = Number(it.gst) || 0
+                  const total = qty * rate * (1 + gst / 100)
+                  return (
+                    <tr key={it.id} className="border-b border-gray-50 last:border-0">
+                      <td className="py-2 text-gray-700">{productName(it.product_id)}</td>
+                      <td className="py-2 text-right text-gray-600">{qty}{it.unit ? ` ${it.unit}` : ''}</td>
+                      <td className="py-2 text-right text-gray-600">₹{inr(rate)}</td>
+                      <td className="py-2 text-right text-gray-500">{gst}%</td>
+                      <td className="py-2 text-right font-medium text-gray-800">₹{inr(total)}</td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50 px-5 py-3">
+          <span className="text-xs text-gray-500">Invoice Total</span>
+          <span className="text-base font-semibold text-gray-900">₹{inr(Number(sale.total) || 0)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Small presentational helpers ────────────────────────────────────────────
+const modalInput =
+  'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black'
+
+function Picker({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-gray-500">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-gray-500">{label}</label>
+      {children}
     </div>
   )
 }
