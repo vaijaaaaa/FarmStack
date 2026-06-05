@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season } from '@/types/farmstack'
+import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season, Entry } from '@/types/farmstack'
 import {
   customerApi,
   supplierApi,
@@ -10,7 +10,9 @@ import {
   salesApi,
   purchaseApi,
   seasonApi,
+  entriesApi,
   type PurchaseHistoryRow,
+  type CreateEntriesPayload,
 } from '@/src/services/api'
 
 function useCollection<T, C, R = void>(
@@ -65,6 +67,39 @@ export function useSeasons() {
     Season
   >(seasonApi.list, seasonApi.create)
   return { seasons: data, loading, error, refresh, createSeason: add }
+}
+
+export function useEntries() {
+  const [entries, setEntries] = useState<Entry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      setEntries(await entriesApi.list())
+      setError(null)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const createEntries = useCallback(
+    async (payload: CreateEntriesPayload) => {
+      const res = await entriesApi.create(payload)
+      await refresh()
+      return res
+    },
+    [refresh],
+  )
+
+  return { entries, loading, error, refresh, createEntries }
 }
 
 export function useSuppliers() {

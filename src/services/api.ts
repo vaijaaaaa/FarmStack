@@ -1,5 +1,5 @@
 // Thin client for the API routes.
-import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season } from '@/types/farmstack'
+import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season, Entry } from '@/types/farmstack'
 
 // The Tally server URL the user configured (their localhost, or a tunnel URL).
 // Stored in the browser and sent on every request so the server posts to the
@@ -47,6 +47,36 @@ export const seasonApi = {
   list: () => request<Season[]>('/api/seasons'),
   create: (payload: Partial<Season>) =>
     request<Season>('/api/seasons', { method: 'POST', body: JSON.stringify(payload) }),
+}
+
+export interface EntryRowPayload {
+  customer_id: string
+  customer_name: string
+  date: string
+  amount: number
+  comments: string
+}
+
+export interface CreateEntriesPayload {
+  season_id: string
+  type: 'cash' | 'credit'
+  location: string
+  rows: EntryRowPayload[]
+}
+
+export const entriesApi = {
+  list: (params?: { season_id?: string; customer_id?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.season_id) qs.set('season_id', params.season_id)
+    if (params?.customer_id) qs.set('customer_id', params.customer_id)
+    const q = qs.toString()
+    return request<Entry[]>(`/api/entries${q ? `?${q}` : ''}`)
+  },
+  create: (payload: CreateEntriesPayload) =>
+    request<{ created: Entry[] }>('/api/entries', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 }
 
 export const supplierApi = {

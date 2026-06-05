@@ -162,7 +162,25 @@ CREATE TABLE IF NOT EXISTS seasons (
   created_at TEXT NOT NULL
 );
 
+-- Entries: cash/credit money movements recorded against a customer within a
+-- season. Each row feeds that customer's season ledger (cash = credit / money
+-- received, credit = debit / amount charged). `type` is 'cash' or 'credit'.
+CREATE TABLE IF NOT EXISTS entries (
+  id TEXT PRIMARY KEY,
+  season_id TEXT REFERENCES seasons(id),
+  customer_id TEXT REFERENCES customers(id),
+  customer_name TEXT DEFAULT '',
+  type TEXT DEFAULT 'cash',
+  date TEXT DEFAULT '',
+  amount REAL DEFAULT 0,
+  comments TEXT DEFAULT '',
+  location TEXT DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sales_items_invoice ON sales_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_purchase_items_invoice ON purchase_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_sales_invoices_created ON sales_invoices(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_purchase_invoices_created ON purchase_invoices(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_season ON entries(season_id);
+CREATE INDEX IF NOT EXISTS idx_entries_customer ON entries(customer_id);

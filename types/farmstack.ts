@@ -8,6 +8,23 @@ export interface Season {
   created_at?: string
 }
 
+export type EntryType = 'cash' | 'credit'
+
+// A cash/credit money movement against a customer within a season.
+// Feeds that customer's season ledger.
+export interface Entry {
+  id: string
+  season_id: string
+  customer_id: string
+  customer_name: string
+  type: EntryType
+  date: string // YYYY-MM-DD
+  amount: number
+  comments: string
+  location: string
+  created_at?: string
+}
+
 export interface TallyMasterFields {
   tally_sync_status?: string
   tally_response?: string | null
