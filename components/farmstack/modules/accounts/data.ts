@@ -2,7 +2,7 @@
 // Ledger records live in the DB (LedgerRecord); the ledger *lines* shown on the
 // Display/Closure screens are composed on the fly from sales (debits) + entries
 // (cash = credit / credit = debit) + the carried opening balance.
-import type { LedgerRecord, SalesInvoice, Entry, Season } from '@/types/farmstack'
+import type { LedgerRecord, SalesInvoice, Entry } from '@/types/farmstack'
 
 export type { Season, LedgerRecord } from '@/types/farmstack'
 
@@ -42,37 +42,23 @@ export function fmtDate(s: string): string {
   return `${dd}-${mm}-${d.getFullYear()}`
 }
 
-// Is a transaction date inside a season's [start, end] range?
-export function inSeasonRange(dateStr: string, start?: string, end?: string): boolean {
-  const d = parseLedgerDate(dateStr)
-  if (!d) return false
-  const s = start ? parseLedgerDate(start) : null
-  const e = end ? parseLedgerDate(end) : null
-  if (s && d < s) return false
-  if (e && d > e) return false
-  return true
-}
-
 // Compose the ledger lines for one customer-in-a-season from sales + entries.
-// When the season has a date range, only sales whose date falls inside it are
-// included — so a customer's sales no longer leak across seasons.
+// Seasons are plain labels (not date-bound), so a customer's sales are matched
+// by customer only here. (Season ↔ transaction binding is handled separately.)
 export function buildLedgerLines(
   ledger: LedgerRecord,
   sales: SalesInvoice[],
   entries: Entry[],
-  season?: Season,
 ): LedgerLine[] {
   const lines: LedgerLine[] = []
-  const hasRange = !!(season?.start_date && season?.end_date)
 
-  // Opening balance carried from a prior season's closure. It is dated to the
-  // season's start (falling back to when the ledger was created) so it accrues
-  // interest across the season — matching the legacy app's dated "O.B" line.
+  // Opening balance carried from a prior season's closure. Dated to when the
+  // ledger was created so it can still accrue interest across the season.
   if (ledger.opening_balance && ledger.opening_balance !== 0) {
     const isCredit = ledger.opening_balance < 0
     lines.push({
       id: `ob-${ledger.id}`,
-      date: season?.start_date || ledger.created_at || '',
+      date: ledger.created_at || '',
       kind: 'ob',
       drcr: isCredit ? 'credit' : 'debit',
       description: 'Opening Balance',
@@ -81,10 +67,8 @@ export function buildLedgerLines(
   }
 
   // Sales for this customer → debits (customer owes for goods bought).
-  // Date-scoped to the season's range when it has one.
   for (const s of sales) {
     if (s.customer_id !== ledger.customer_id) continue
-    if (hasRange && !inSeasonRange(s.date || s.created_at || '', season!.start_date, season!.end_date)) continue
     lines.push({
       id: `sale-${s.id}`,
       date: s.date || s.created_at || '',

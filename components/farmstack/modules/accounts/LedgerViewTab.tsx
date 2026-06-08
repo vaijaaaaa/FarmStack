@@ -69,11 +69,10 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose, onReope
     [ledgers, seasonId],
   )
   const ledger = ledgers.find((l) => l.id === ledgerId && l.season_id === seasonId) ?? null
-  const season = seasons.find((s) => s.id === seasonId)
 
   const lines = useMemo(
-    () => (ledger ? buildLedgerLines(ledger, invoices, entries, season) : []),
-    [ledger, invoices, entries, season],
+    () => (ledger ? buildLedgerLines(ledger, invoices, entries) : []),
+    [ledger, invoices, entries],
   )
 
   const { debit, credit, grand } = totalsFor(lines)
