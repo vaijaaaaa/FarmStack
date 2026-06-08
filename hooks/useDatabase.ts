@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season, Entry, LedgerRecord } from '@/types/farmstack'
 import {
   customerApi,
@@ -67,6 +67,11 @@ export function useSeasons() {
     Partial<Season>,
     Season
   >(seasonApi.list, seasonApi.create)
+  // Sort high → low by name (numeric-aware): 2027, 2026, 2025…
+  const seasons = useMemo(
+    () => [...data].sort((a, b) => (b.name || '').localeCompare(a.name || '', undefined, { numeric: true })),
+    [data],
+  )
   const updateSeason = useCallback(
     async (id: string, payload: Partial<Season>) => {
       const res = await seasonApi.update(id, payload)
@@ -75,7 +80,7 @@ export function useSeasons() {
     },
     [refresh],
   )
-  return { seasons: data, loading, error, refresh, createSeason: add, updateSeason }
+  return { seasons, loading, error, refresh, createSeason: add, updateSeason }
 }
 
 export function useEntries() {

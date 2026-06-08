@@ -152,17 +152,18 @@ export async function POST(request: Request) {
     await transaction((run) => {
       run(
         `INSERT INTO sales_invoices
-          (id, invoice_number, customer_id, customer_name, tally_name, date, sale_type, total, status,
+          (id, invoice_number, customer_id, customer_name, tally_name, narration, date, sale_type, total, status,
            eway_bill_no, eway_bill_date, dispatch_from, ship_to, transporter_name, transporter_id,
            transport_mode, transport_doc_no, transport_doc_date, vehicle_number, vehicle_type,
            tally_sync_enabled, tally_sync_status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           invoiceNumber,
           customerId,
           String(body.customer_name ?? ''),
           String(body.tally_name ?? ''),
+          String(body.narration ?? ''),
           String(body.date ?? ''),
           saleType,
           total,
@@ -206,6 +207,7 @@ export async function POST(request: Request) {
         customer_id: customerId,
         customer_name: body.customer_name ?? '',
         tally_name: body.tally_name ?? '',
+        narration: body.narration ?? '',
         date: body.date ?? '',
         sale_type: saleType,
         items: builtItems,

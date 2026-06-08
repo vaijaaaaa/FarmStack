@@ -618,8 +618,17 @@ function RateField({
       <div className="flex items-center gap-1.5">
         <input
           type="number"
+          min="0"
+          step="any"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value
+            if (v !== '' && Number(v) < 0) return // never allow a negative rate
+            onChange(v)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === '-' || e.key === 'e') e.preventDefault()
+          }}
           placeholder="—"
           className="w-20 rounded-md border border-amber-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
         />

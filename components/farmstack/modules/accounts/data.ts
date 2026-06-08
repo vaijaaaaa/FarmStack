@@ -65,12 +65,14 @@ export function buildLedgerLines(
   const lines: LedgerLine[] = []
   const hasRange = !!(season?.start_date && season?.end_date)
 
-  // Opening balance carried from a prior season's closure.
+  // Opening balance carried from a prior season's closure. It is dated to the
+  // season's start (falling back to when the ledger was created) so it accrues
+  // interest across the season — matching the legacy app's dated "O.B" line.
   if (ledger.opening_balance && ledger.opening_balance !== 0) {
     const isCredit = ledger.opening_balance < 0
     lines.push({
       id: `ob-${ledger.id}`,
-      date: '',
+      date: season?.start_date || ledger.created_at || '',
       kind: 'ob',
       drcr: isCredit ? 'credit' : 'debit',
       description: 'Opening Balance',
@@ -108,8 +110,10 @@ export function buildLedgerLines(
     })
   }
 
-  // Chronological; opening balance (no date) stays first.
+  // Chronological, but the opening balance is always pinned first.
   lines.sort((a, b) => {
+    if (a.kind === 'ob') return -1
+    if (b.kind === 'ob') return 1
     const da = parseLedgerDate(a.date)?.getTime() ?? -Infinity
     const db = parseLedgerDate(b.date)?.getTime() ?? -Infinity
     return da - db

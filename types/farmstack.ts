@@ -134,6 +134,7 @@ export interface SalesInvoice {
   customer_id: string
   customer_name?: string
   tally_name?: string
+  narration?: string
   date?: string
   sale_type?: SaleType
   product_name?: string

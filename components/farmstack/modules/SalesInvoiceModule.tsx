@@ -118,6 +118,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [selectedTallyName, setSelectedTallyName] = useState('Cash')
+  const [narration, setNarration] = useState('')
   // Searchable customer dropdown — search by Name or City (address field).
   const [customerOpen, setCustomerOpen] = useState(false)
   const [customerSearch, setCustomerSearch] = useState('')
@@ -378,6 +379,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     const headers = [
       'Customer Name',
       'Tally Name',
+      'Narration',
       'Sale Type',
       'Sale Date',
       'Invoice Total',
@@ -403,6 +405,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         rows.push([
           String(inv.customer_name || customer?.name || ''),
           String(inv.tally_name ?? ''),
+          String(inv.narration ?? ''),
           (inv.sale_type || 'cash') === 'credit' ? 'Credit Sale' : 'Cash Sale',
           saleDate(inv),
           Number(inv.total || 0),
@@ -476,6 +479,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       <div class="meta">
         <div><strong>Customer:</strong> ${inv.customer_name ?? ''}</div>
         <div><strong>Tally Name:</strong> ${inv.tally_name ?? ''}</div>
+        ${inv.narration ? `<div><strong>Narration:</strong> ${inv.narration}</div>` : ''}
         <div><strong>Invoice #:</strong> ${inv.invoice_number ?? ''}</div>
         <div><strong>Date:</strong> ${saleDate(inv)}</div>
       </div>
@@ -642,6 +646,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       customer_id: selectedCustomerId,
       customer_name: customer?.name || '',
       tally_name: selectedTallyName,
+      narration: narration.trim(),
       date,
       sale_type: isCash ? 'cash' : 'credit',
       status: 'saved',
@@ -658,6 +663,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
       setSaleLines([createEmptyLine()])
       setSelectedCustomerId('')
       setSelectedTallyName('Cash')
+      setNarration('')
       setDate(todayISO())
       // Tally sync happens automatically for products that were purchased with
       // Tally sync on; result.tally is present only when a sync was attempted.
@@ -754,7 +760,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
 
             {/* Header fields: Customer Name | Tally Name | Sale Date | Total */}
             <div className="mb-8">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-4">
                 {/* Customer Name — searchable dropdown */}
                 <div ref={customerBoxRef} className="relative flex flex-col gap-1">
                   <label className="text-gray-700 font-medium text-xs">Customer Name</label>
@@ -862,6 +868,18 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                       <option value={selectedCustomerLabel}>{selectedCustomerLabel}</option>
                     )}
                   </select>
+                </div>
+
+                {/* Narration — optional free-text label to identify who the sale was for */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-gray-700 font-medium text-xs">Narration</label>
+                  <input
+                    type="text"
+                    value={narration}
+                    onChange={(e) => setNarration(e.target.value)}
+                    placeholder="e.g. who is this sale for?"
+                    className="w-full rounded-md border border-gray-400 px-3 py-2 text-sm text-gray-700 bg-gray-50 placeholder-gray-400 focus:outline-none"
+                  />
                 </div>
 
                 {/* Sale Date */}
@@ -1562,6 +1580,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Customer</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Tally Name</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Narration</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Date</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Total</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Status</th>
@@ -1584,6 +1603,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                         {inv.customer_name || customer?.name || 'N/A'}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">{inv.tally_name || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{inv.narration || '—'}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">{saleDate(inv)}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">₹{Number(inv.total).toFixed(2)}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">
@@ -1631,7 +1651,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                     </tr>
                     {expandedSaleId === String(inv.id) && (
                       <tr>
-                        <td colSpan={6} className="bg-gray-50 px-4 py-4">
+                        <td colSpan={7} className="bg-gray-50 px-4 py-4">
                           <p className="font-semibold text-black mb-2">Invoice Details</p>
                           <div className="grid grid-cols-4 gap-2 text-sm text-gray-700 mb-4">
                             <div>
@@ -1643,6 +1663,10 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                             <div>
                               <span className="text-gray-500">Tally Name</span>
                               <p className="font-medium text-black">{inv.tally_name || '—'}</p>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Narration</span>
+                              <p className="font-medium text-black">{inv.narration || '—'}</p>
                             </div>
                             <div>
                               <span className="text-gray-500">Date</span>
@@ -1711,7 +1735,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
               })}
               {visibleInvoices.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-500">
                     No sales match the selected filters.
                   </td>
                 </tr>

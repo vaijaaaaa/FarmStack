@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS sales_invoices (
   customer_id TEXT REFERENCES customers(id),
   customer_name TEXT DEFAULT '',
   tally_name TEXT DEFAULT '',
+  narration TEXT DEFAULT '',   -- free-text label to identify who a (cash) sale was for
   date TEXT DEFAULT '',
   sale_type TEXT DEFAULT 'cash',
   total REAL DEFAULT 0,
