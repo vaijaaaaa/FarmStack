@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Plus, Users } from 'lucide-react'
 import { useCustomers } from '@/hooks/useDatabase'
 import type { LedgerRecord, Season } from '@/types/farmstack'
@@ -19,8 +19,7 @@ interface LedgerAddingTabProps {
 
 const EMPTY = {
   seasonId: '',
-  customerId: '',
-  userName: '',
+  userId: '', // the "User" = a customer from the full master list
   description: '',
   acres: '',
   closureDate: '',
@@ -31,6 +30,8 @@ const EMPTY = {
 export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: LedgerAddingTabProps) {
   const { customers } = useCustomers()
   const [form, setForm] = useState(EMPTY)
+  // The "Account" dropdown — the customer already added to the selected season.
+  const [accountCustomerId, setAccountCustomerId] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [showBulk, setShowBulk] = useState(false)
@@ -43,7 +44,23 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
     label: s.name || s.description || '(untitled)',
   }))
 
-  const customerOptions = customers.map((c) => ({ value: c.id, label: c.name }))
+  // User = ALL customers (the master list to pick from).
+  const userOptions = customers.map((c) => ({ value: c.id, label: c.name }))
+
+  // Account = only the customers already attached to the selected season.
+  const accountOptions = useMemo(
+    () =>
+      ledgers
+        .filter((l) => l.season_id === form.seasonId)
+        .map((l) => ({ value: l.customer_id, label: l.customer_name })),
+    [ledgers, form.seasonId],
+  )
+
+  const changeSeason = (v: string) => {
+    set('seasonId', v)
+    setAccountCustomerId('')
+    setMsg(null)
+  }
 
   const submit = async () => {
     setMsg(null)
@@ -51,24 +68,25 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
       setMsg({ kind: 'err', text: 'Please select a season.' })
       return
     }
-    if (!form.customerId) {
-      setMsg({ kind: 'err', text: 'Please select an account (customer).' })
+    if (!form.userId) {
+      setMsg({ kind: 'err', text: 'Please select a user (customer).' })
       return
     }
     setSaving(true)
     try {
-      const customer = customers.find((c) => c.id === form.customerId)
+      const customer = customers.find((c) => c.id === form.userId)
       await onAdd({
         season_id: form.seasonId,
-        customer_id: form.customerId,
+        customer_id: form.userId,
         customer_name: customer?.name ?? '',
-        user_name: form.userName,
         description: form.description,
         acres: Number(form.acres) || 0,
         credit_limit: Number(form.creditLimit) || 0,
         display_number: Number(form.displayNumber) || 0,
         closure_date: form.closureDate,
       })
+      // Show the just-added customer in the Account dropdown.
+      setAccountCustomerId(form.userId)
       setForm((prev) => ({ ...EMPTY, seasonId: prev.seasonId }))
       setMsg({ kind: 'ok', text: `${customer?.name ?? 'Customer'} added to the season.` })
     } catch (err) {
@@ -84,7 +102,9 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-sm font-semibold text-gray-900">Add Ledger</h2>
-            <p className="mt-0.5 text-xs text-gray-400">Attach a customer to a season.</p>
+            <p className="mt-0.5 text-xs text-gray-400">
+              Pick a season and a user (customer) to create their account.
+            </p>
           </div>
           <button
             onClick={() => setShowBulk(true)}
@@ -99,26 +119,27 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
             <SearchableSelect
               options={seasonOptions}
               value={form.seasonId}
-              onChange={(v) => set('seasonId', v)}
+              onChange={changeSeason}
               placeholder="— Select season —"
             />
           </Field>
 
+          {/* Account = customers already in this season · User = all customers */}
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Account">
+            <Field label="Account (in this season)">
               <SearchableSelect
-                options={customerOptions}
-                value={form.customerId}
-                onChange={(v) => set('customerId', v)}
-                placeholder="— Select customer —"
+                options={accountOptions}
+                value={accountCustomerId}
+                onChange={setAccountCustomerId}
+                placeholder={form.seasonId ? '— Accounts —' : '— Select season —'}
               />
             </Field>
-            <Field label="User">
-              <input
-                value={form.userName}
-                onChange={(e) => set('userName', e.target.value)}
-                placeholder="Optional"
-                className={inputCls}
+            <Field label="User (customer)">
+              <SearchableSelect
+                options={userOptions}
+                value={form.userId}
+                onChange={(v) => set('userId', v)}
+                placeholder="— Select customer —"
               />
             </Field>
           </div>

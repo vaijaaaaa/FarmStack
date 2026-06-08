@@ -14,6 +14,7 @@ interface BulkRow {
   closure_date: string
   credit_limit: string
   display_number: string
+  selected: boolean
 }
 
 interface SeasonLedgerTableProps {
@@ -40,7 +41,7 @@ export default function SeasonLedgerTable({
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [rows, setRows] = useState<BulkRow[]>(() =>
-    customers.map((c, i) => ({
+    customers.map((c) => ({
       customer_id: c.id,
       customer_name: c.name,
       user_name: '',
@@ -48,7 +49,8 @@ export default function SeasonLedgerTable({
       acres: '',
       closure_date: '',
       credit_limit: '',
-      display_number: String(i + 1),
+      display_number: '', // blank — the user sets it
+      selected: true,
     })),
   )
 
@@ -57,16 +59,32 @@ export default function SeasonLedgerTable({
     label: s.name || s.description || '(untitled)',
   }))
 
-  // Customers already attached to the selected season (skip these).
+  // Customers already attached to the selected season (skip + no checkbox).
   const alreadyIn = useMemo(
     () => new Set(ledgers.filter((l) => l.season_id === seasonId).map((l) => l.customer_id)),
     [ledgers, seasonId],
   )
 
-  const toAddCount = rows.filter((r) => !alreadyIn.has(r.customer_id)).length
+  // Un-added customers first; already-added ones sink to the bottom.
+  const ordered = useMemo(
+    () =>
+      [...rows].sort(
+        (a, b) => Number(alreadyIn.has(a.customer_id)) - Number(alreadyIn.has(b.customer_id)),
+      ),
+    [rows, alreadyIn],
+  )
 
-  const set = (idx: number, key: keyof BulkRow, value: string) =>
-    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [key]: value } : r)))
+  const selectable = rows.filter((r) => !alreadyIn.has(r.customer_id))
+  const selectedCount = selectable.filter((r) => r.selected).length
+  const allSelected = selectable.length > 0 && selectable.every((r) => r.selected)
+
+  const setRow = (cid: string, key: keyof BulkRow, value: string | boolean) =>
+    setRows((prev) => prev.map((r) => (r.customer_id === cid ? { ...r, [key]: value } : r)))
+
+  const toggleAll = () =>
+    setRows((prev) =>
+      prev.map((r) => (alreadyIn.has(r.customer_id) ? r : { ...r, selected: !allSelected })),
+    )
 
   const submit = async () => {
     setMsg(null)
@@ -75,7 +93,7 @@ export default function SeasonLedgerTable({
       return
     }
     const payloadRows = rows
-      .filter((r) => !alreadyIn.has(r.customer_id))
+      .filter((r) => !alreadyIn.has(r.customer_id) && r.selected)
       .map((r) => ({
         customer_id: r.customer_id,
         customer_name: r.customer_name,
@@ -87,7 +105,7 @@ export default function SeasonLedgerTable({
         closure_date: r.closure_date,
       }))
     if (payloadRows.length === 0) {
-      setMsg({ kind: 'err', text: 'All customers are already in this season.' })
+      setMsg({ kind: 'err', text: 'Select at least one customer to add.' })
       return
     }
     setSaving(true)
@@ -134,7 +152,7 @@ export default function SeasonLedgerTable({
             </div>
           </div>
           <span className="text-xs text-gray-400">
-            {customers.length} customers · {toAddCount} to add
+            {customers.length} customers · {selectedCount} selected
             {alreadyIn.size > 0 ? ` · ${alreadyIn.size} already in season` : ''}
           </span>
         </div>
@@ -151,15 +169,29 @@ export default function SeasonLedgerTable({
                 <Th className="w-40">Closure Date</Th>
                 <Th className="w-32">Loyalty</Th>
                 <Th className="w-28">Display No.</Th>
+                <th className="w-20 px-3 py-2.5 text-center font-medium text-gray-500">
+                  <label className="flex items-center justify-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      className="h-4 w-4 accent-black"
+                      title="Select / unselect all"
+                    />
+                  </label>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => {
+              {ordered.map((r) => {
                 const added = alreadyIn.has(r.customer_id)
+                const dim = !added && !r.selected
                 return (
                   <tr
                     key={r.customer_id}
-                    className={`border-b border-gray-50 last:border-0 ${added ? 'bg-gray-50/60' : 'hover:bg-gray-50/40'}`}
+                    className={`border-b border-gray-50 last:border-0 ${
+                      added ? 'bg-gray-50/60' : dim ? 'opacity-50 hover:opacity-100' : 'hover:bg-gray-50/40'
+                    }`}
                   >
                     <td className="px-3 py-1.5">
                       <div className="flex items-center gap-2">
@@ -171,12 +203,22 @@ export default function SeasonLedgerTable({
                         )}
                       </div>
                     </td>
-                    <td className="px-2 py-1.5"><Cell value={r.user_name} onChange={(v) => set(i, 'user_name', v)} disabled={added} /></td>
-                    <td className="px-2 py-1.5"><Cell value={r.description} onChange={(v) => set(i, 'description', v)} disabled={added} /></td>
-                    <td className="px-2 py-1.5"><Cell type="number" value={r.acres} onChange={(v) => set(i, 'acres', v)} disabled={added} placeholder="0" /></td>
-                    <td className="px-2 py-1.5"><Cell type="date" value={r.closure_date} onChange={(v) => set(i, 'closure_date', v)} disabled={added} /></td>
-                    <td className="px-2 py-1.5"><Cell type="number" value={r.credit_limit} onChange={(v) => set(i, 'credit_limit', v)} disabled={added} placeholder="0" /></td>
-                    <td className="px-2 py-1.5"><Cell type="number" value={r.display_number} onChange={(v) => set(i, 'display_number', v)} disabled={added} /></td>
+                    <td className="px-2 py-1.5"><Cell value={r.user_name} onChange={(v) => setRow(r.customer_id, 'user_name', v)} disabled={added} /></td>
+                    <td className="px-2 py-1.5"><Cell value={r.description} onChange={(v) => setRow(r.customer_id, 'description', v)} disabled={added} /></td>
+                    <td className="px-2 py-1.5"><Cell type="number" value={r.acres} onChange={(v) => setRow(r.customer_id, 'acres', v)} disabled={added} placeholder="0" /></td>
+                    <td className="px-2 py-1.5"><Cell type="date" value={r.closure_date} onChange={(v) => setRow(r.customer_id, 'closure_date', v)} disabled={added} /></td>
+                    <td className="px-2 py-1.5"><Cell type="number" value={r.credit_limit} onChange={(v) => setRow(r.customer_id, 'credit_limit', v)} disabled={added} placeholder="0" /></td>
+                    <td className="px-2 py-1.5"><Cell type="number" value={r.display_number} onChange={(v) => setRow(r.customer_id, 'display_number', v)} disabled={added} placeholder="—" /></td>
+                    <td className="px-2 py-1.5 text-center">
+                      {!added && (
+                        <input
+                          type="checkbox"
+                          checked={r.selected}
+                          onChange={(e) => setRow(r.customer_id, 'selected', e.target.checked)}
+                          className="h-4 w-4 accent-black"
+                        />
+                      )}
+                    </td>
                   </tr>
                 )
               })}
@@ -187,7 +229,7 @@ export default function SeasonLedgerTable({
         {/* ── Sticky footer ─────────────────────────────────────────── */}
         <div className="flex shrink-0 items-center justify-between gap-4 border-t border-gray-100 px-5 py-4">
           <span className={`text-xs ${msg ? (msg.kind === 'ok' ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}`}>
-            {msg ? msg.text : 'Existing customers in this season are skipped.'}
+            {msg ? msg.text : 'Tick the customers to add. Already-added customers are skipped.'}
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-600 hover:border-gray-400">
@@ -195,10 +237,10 @@ export default function SeasonLedgerTable({
             </button>
             <button
               onClick={submit}
-              disabled={saving || !seasonId || toAddCount === 0}
+              disabled={saving || !seasonId || selectedCount === 0}
               className="rounded-md bg-black px-6 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40"
             >
-              {saving ? 'Adding…' : `Add All (${toAddCount})`}
+              {saving ? 'Adding…' : `Add All (${selectedCount})`}
             </button>
           </div>
         </div>
