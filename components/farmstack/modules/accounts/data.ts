@@ -2,7 +2,7 @@
 // Ledger records live in the DB (LedgerRecord); the ledger *lines* shown on the
 // Display/Closure screens are composed on the fly from sales (debits) + entries
 // (cash = credit / credit = debit) + the carried opening balance.
-import type { LedgerRecord, SalesInvoice, Entry } from '@/types/farmstack'
+import type { LedgerRecord, SalesInvoice, Entry, Season } from '@/types/farmstack'
 
 export type { Season, LedgerRecord } from '@/types/farmstack'
 
@@ -42,13 +42,28 @@ export function fmtDate(s: string): string {
   return `${dd}-${mm}-${d.getFullYear()}`
 }
 
+// Is a transaction date inside a season's [start, end] range?
+export function inSeasonRange(dateStr: string, start?: string, end?: string): boolean {
+  const d = parseLedgerDate(dateStr)
+  if (!d) return false
+  const s = start ? parseLedgerDate(start) : null
+  const e = end ? parseLedgerDate(end) : null
+  if (s && d < s) return false
+  if (e && d > e) return false
+  return true
+}
+
 // Compose the ledger lines for one customer-in-a-season from sales + entries.
+// When the season has a date range, only sales whose date falls inside it are
+// included — so a customer's sales no longer leak across seasons.
 export function buildLedgerLines(
   ledger: LedgerRecord,
   sales: SalesInvoice[],
   entries: Entry[],
+  season?: Season,
 ): LedgerLine[] {
   const lines: LedgerLine[] = []
+  const hasRange = !!(season?.start_date && season?.end_date)
 
   // Opening balance carried from a prior season's closure.
   if (ledger.opening_balance && ledger.opening_balance !== 0) {
@@ -64,8 +79,10 @@ export function buildLedgerLines(
   }
 
   // Sales for this customer → debits (customer owes for goods bought).
+  // Date-scoped to the season's range when it has one.
   for (const s of sales) {
     if (s.customer_id !== ledger.customer_id) continue
+    if (hasRange && !inSeasonRange(s.date || s.created_at || '', season!.start_date, season!.end_date)) continue
     lines.push({
       id: `sale-${s.id}`,
       date: s.date || s.created_at || '',
@@ -99,6 +116,45 @@ export function buildLedgerLines(
   })
 
   return lines
+}
+
+// ── Interest math (faithful to the legacy Accountant app) ───────────────────
+// Day count, 30/360 convention. Mirrors the legacy `Days360`.
+export function days360(from: Date, to: Date): number {
+  let d1 = from.getDate()
+  if (d1 === 31) d1 = 30
+  let d2 = to.getDate()
+  if (d2 === 31 && d1 === 30) d2 = 30
+  return (
+    360 * (to.getFullYear() - from.getFullYear()) +
+    30 * (to.getMonth() - from.getMonth()) +
+    (d2 - d1)
+  )
+}
+
+// Day count for one side. basis 360 → 30/360 convention; 365 → actual calendar days.
+export function dayCount(from: Date, to: Date, basis: 360 | 365): number {
+  if (basis === 365) {
+    return Math.round((to.getTime() - from.getTime()) / 86400000)
+  }
+  return days360(from, to)
+}
+
+// Legacy custom paise rounding (`RoundOff`): <30p → floor, 30–59p → .50, ≥60p → round up.
+export function roundOff(x: number): number {
+  const paise = ((Math.round(x * 100) % 100) + 100) % 100
+  if (paise === 0) return x
+  if (paise < 30) return Math.trunc(x)
+  if (paise < 60) return Math.trunc(x) + 0.5
+  return Math.round(x)
+}
+
+// One line's interest = amount × (days / 30) × (ratePerMonth / 100), then RoundOff.
+// `rate` is a PER-MONTH percentage (the /30 turns days into months) — this is the
+// legacy convention, not an annual rate.
+export function lineInterest(amount: number, ratePerMonth: number, days: number): number {
+  if (days <= 0 || ratePerMonth <= 0 || amount <= 0) return 0
+  return roundOff(amount * (days / 30) * (ratePerMonth / 100))
 }
 
 export function totalsFor(lines: LedgerLine[]) {

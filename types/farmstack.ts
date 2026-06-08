@@ -5,6 +5,8 @@ export interface Season {
   id: string
   name: string
   description: string
+  start_date?: string
+  end_date?: string
   created_at?: string
 }
 
@@ -40,6 +42,8 @@ export interface LedgerRecord {
   display_number: number
   closure_date: string
   opening_balance: number
+  closing_balance?: number
+  carried?: number
   status: 'open' | 'closed'
   created_at?: string
 }

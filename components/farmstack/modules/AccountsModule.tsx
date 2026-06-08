@@ -22,8 +22,8 @@ const TABS = [
 
 export default function AccountsModule({ language }: AccountsModuleProps) {
   const tabsRef = useRef<HTMLDivElement>(null)
-  const { seasons, loading: seasonsLoading, createSeason } = useSeasons()
-  const { ledgers, createLedger, closeLedger, refresh: refreshLedgers } = useLedgers()
+  const { seasons, loading: seasonsLoading, createSeason, updateSeason } = useSeasons()
+  const { ledgers, createLedger, closeLedger, reopenLedger, refresh: refreshLedgers } = useLedgers()
 
   // Number-key tab shortcuts (same UX as AnalyticsModule)
   useEffect(() => {
@@ -40,9 +40,6 @@ export default function AccountsModule({ language }: AccountsModuleProps) {
     return () => window.removeEventListener('keydown', handleKey)
   }, [])
 
-  const addSeason = async (name: string, description: string) => {
-    await createSeason({ name, description })
-  }
 
   return (
     // Pull back the p-8 from AppLayout so this page owns its full viewport height
@@ -75,7 +72,7 @@ export default function AccountsModule({ language }: AccountsModuleProps) {
         </TabsList>
 
         <TabsContent value="season" className="min-h-0 flex-1 overflow-auto">
-          <SeasonsTab seasons={seasons} loading={seasonsLoading} onAdd={addSeason} />
+          <SeasonsTab seasons={seasons} loading={seasonsLoading} onAdd={createSeason} onUpdate={updateSeason} />
         </TabsContent>
 
         <TabsContent value="ledger-adding" className="min-h-0 flex-1 overflow-hidden">
@@ -91,8 +88,12 @@ export default function AccountsModule({ language }: AccountsModuleProps) {
             mode="closure"
             seasons={seasons}
             ledgers={ledgers}
-            onClose={async (id, date) => {
-              await closeLedger(id, date)
+            onClose={async (id, date, closingBalance) => {
+              await closeLedger(id, date, closingBalance)
+              await refreshLedgers()
+            }}
+            onReopen={async (id) => {
+              await reopenLedger(id)
               await refreshLedgers()
             }}
           />

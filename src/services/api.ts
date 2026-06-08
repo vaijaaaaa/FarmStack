@@ -47,6 +47,11 @@ export const seasonApi = {
   list: () => request<Season[]>('/api/seasons'),
   create: (payload: Partial<Season>) =>
     request<Season>('/api/seasons', { method: 'POST', body: JSON.stringify(payload) }),
+  update: (id: string, payload: Partial<Season>) =>
+    request<{ id: string }>('/api/seasons', {
+      method: 'PATCH',
+      body: JSON.stringify({ id, ...payload }),
+    }),
 }
 
 export interface EntryRowPayload {
@@ -89,10 +94,15 @@ export const ledgerApi = {
   },
   create: (payload: Partial<LedgerRecord>) =>
     request<LedgerRecord>('/api/ledgers', { method: 'POST', body: JSON.stringify(payload) }),
-  close: (id: string, closure_date: string) =>
+  close: (id: string, closure_date: string, closing_balance: number) =>
     request<{ id: string; status: string; closure_date: string }>('/api/ledgers', {
       method: 'PATCH',
-      body: JSON.stringify({ id, closure_date }),
+      body: JSON.stringify({ id, closure_date, closing_balance }),
+    }),
+  reopen: (id: string) =>
+    request<{ id: string; status: string }>('/api/ledgers', {
+      method: 'PATCH',
+      body: JSON.stringify({ id, action: 'reopen' }),
     }),
 }
 

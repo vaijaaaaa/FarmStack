@@ -67,7 +67,15 @@ export function useSeasons() {
     Partial<Season>,
     Season
   >(seasonApi.list, seasonApi.create)
-  return { seasons: data, loading, error, refresh, createSeason: add }
+  const updateSeason = useCallback(
+    async (id: string, payload: Partial<Season>) => {
+      const res = await seasonApi.update(id, payload)
+      await refresh()
+      return res
+    },
+    [refresh],
+  )
+  return { seasons: data, loading, error, refresh, createSeason: add, updateSeason }
 }
 
 export function useEntries() {
@@ -134,15 +142,24 @@ export function useLedgers() {
   )
 
   const closeLedger = useCallback(
-    async (id: string, closureDate: string) => {
-      const res = await ledgerApi.close(id, closureDate)
+    async (id: string, closureDate: string, closingBalance: number) => {
+      const res = await ledgerApi.close(id, closureDate, closingBalance)
       await refresh()
       return res
     },
     [refresh],
   )
 
-  return { ledgers, loading, error, refresh, createLedger, closeLedger }
+  const reopenLedger = useCallback(
+    async (id: string) => {
+      const res = await ledgerApi.reopen(id)
+      await refresh()
+      return res
+    },
+    [refresh],
+  )
+
+  return { ledgers, loading, error, refresh, createLedger, closeLedger, reopenLedger }
 }
 
 export function useSuppliers() {

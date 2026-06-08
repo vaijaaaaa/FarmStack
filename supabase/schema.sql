@@ -159,6 +159,8 @@ CREATE TABLE IF NOT EXISTS seasons (
   id TEXT PRIMARY KEY,
   name TEXT DEFAULT '',
   description TEXT DEFAULT '',
+  start_date TEXT DEFAULT '',   -- season date range: a sale/entry belongs to the
+  end_date TEXT DEFAULT '',     -- season whose [start_date, end_date] its date falls in
   created_at TEXT NOT NULL
 );
 
@@ -194,6 +196,8 @@ CREATE TABLE IF NOT EXISTS ledgers (
   display_number INTEGER DEFAULT 0,
   closure_date TEXT DEFAULT '',
   opening_balance REAL DEFAULT 0,
+  closing_balance REAL DEFAULT 0,   -- net outstanding recorded at closure
+  carried INTEGER DEFAULT 0,        -- 1 once this closed balance has flowed into a later season's ledger
   status TEXT DEFAULT 'open',
   created_at TEXT NOT NULL,
   UNIQUE (season_id, customer_id)

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { query, transaction, newId, nowIso } from '@/lib/db'
+import { ensureLedgerExists } from '@/lib/accounts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -96,6 +97,15 @@ export async function POST(request: Request) {
         )
       }
     })
+
+    // Make sure each customer has a ledger in this season, so the entry shows up
+    // in the Accounts ledger (auto-create with carried-forward opening balance).
+    const seen = new Set<string>()
+    for (const e of entries) {
+      if (seen.has(e.customer_id)) continue
+      seen.add(e.customer_id)
+      await ensureLedgerExists(seasonId, e.customer_id, e.customer_name)
+    }
 
     return NextResponse.json({ created: entries }, { status: 201 })
   } catch (err) {

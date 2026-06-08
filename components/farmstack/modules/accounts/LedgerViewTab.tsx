@@ -10,6 +10,8 @@ import {
   inr,
   fmtDate,
   parseLedgerDate,
+  dayCount,
+  lineInterest,
   type LedgerLine,
   type LineKind,
 } from './data'
@@ -18,10 +20,16 @@ interface LedgerViewTabProps {
   mode: 'display' | 'closure'
   seasons: Season[]
   ledgers: LedgerRecord[]
-  onClose?: (ledgerId: string, closureDate: string) => Promise<void> | void
+  onClose?: (
+    ledgerId: string,
+    closureDate: string,
+    closingBalance: number,
+  ) => Promise<void> | void
+  onReopen?: (ledgerId: string) => Promise<void> | void
 }
 
 type OptionFilter = 'all' | 'debit' | 'credit'
+type Basis = 360 | 365
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -33,7 +41,7 @@ const KIND_BADGE: Record<LineKind, { label: string; cls: string }> = {
   credit: { label: 'Credit', cls: 'bg-amber-100 text-amber-700' },
 }
 
-export default function LedgerViewTab({ mode, seasons, ledgers, onClose }: LedgerViewTabProps) {
+export default function LedgerViewTab({ mode, seasons, ledgers, onClose, onReopen }: LedgerViewTabProps) {
   const closing = mode === 'closure'
 
   const { invoices } = useSalesInvoices()
@@ -44,9 +52,15 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose }: Ledge
   const [ledgerId, setLedgerId] = useState('')
   const [option, setOption] = useState<OptionFilter>('all')
   const [closureDate, setClosureDate] = useState(today())
-  const [debitRate, setDebitRate] = useState('2')
-  const [creditRate, setCreditRate] = useState('1')
+  // Rates are user-entered (dynamic) — no hard-coded defaults.
+  const [debitRate, setDebitRate] = useState('')
+  const [creditRate, setCreditRate] = useState('')
+  const [debitBasis, setDebitBasis] = useState<Basis>(365)
+  const [creditBasis, setCreditBasis] = useState<Basis>(360)
   const [interest, setInterest] = useState<Record<string, { interest: number; days: number }>>({})
+  const [interestSummary, setInterestSummary] = useState({ debit: 0, credit: 0 })
+  const [calculated, setCalculated] = useState(false)
+  const [closing_, setClosing_] = useState(false)
   const [showEntry, setShowEntry] = useState(false)
   const [saleDetail, setSaleDetail] = useState<SalesInvoice | null>(null)
 
@@ -55,10 +69,11 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose }: Ledge
     [ledgers, seasonId],
   )
   const ledger = ledgers.find((l) => l.id === ledgerId && l.season_id === seasonId) ?? null
+  const season = seasons.find((s) => s.id === seasonId)
 
   const lines = useMemo(
-    () => (ledger ? buildLedgerLines(ledger, invoices, entries) : []),
-    [ledger, invoices, entries],
+    () => (ledger ? buildLedgerLines(ledger, invoices, entries, season) : []),
+    [ledger, invoices, entries, season],
   )
 
   const { debit, credit, grand } = totalsFor(lines)
@@ -68,29 +83,65 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose }: Ledge
     return lines.filter((l) => l.drcr === option)
   }, [lines, option])
 
-  const totalInterest = Object.values(interest).reduce((s, v) => s + v.interest, 0)
+  // Pure interest pass — used by Calculate (to fill the grid) and Close (fresh net).
+  const computeAll = (closeStr: string) => {
+    const close = parseLedgerDate(closeStr)
+    const map: Record<string, { interest: number; days: number }> = {}
+    let di = 0
+    let ci = 0
+    if (close) {
+      const dr = Number(debitRate) || 0
+      const cr = Number(creditRate) || 0
+      for (const l of lines) {
+        const from = parseLedgerDate(l.date)
+        if (!from) continue // opening balance has no date → does not accrue
+        const isDebit = l.drcr === 'debit'
+        const basis = isDebit ? debitBasis : creditBasis
+        const rate = isDebit ? dr : cr
+        const days = Math.max(0, dayCount(from, close, basis))
+        const intr = lineInterest(l.amount, rate, days)
+        map[l.id] = { days, interest: intr }
+        if (isDebit) di += intr
+        else ci += intr
+      }
+    }
+    return { map, debitInterest: di, creditInterest: ci }
+  }
 
   const calculate = () => {
-    const close = parseLedgerDate(closureDate)
-    if (!close) return
-    const dr = Number(debitRate) || 0
-    const cr = Number(creditRate) || 0
-    const next: Record<string, { interest: number; days: number }> = {}
-    for (const l of lines) {
-      const d = parseLedgerDate(l.date)
-      if (!d) continue
-      const days = Math.max(0, Math.round((close.getTime() - d.getTime()) / 86400000))
-      const rate = l.drcr === 'debit' ? dr : cr
-      const basis = l.drcr === 'debit' ? 365 : 360
-      next[l.id] = { days, interest: (l.amount * rate * days) / (100 * basis) }
+    const r = computeAll(closureDate)
+    setInterest(r.map)
+    setInterestSummary({ debit: r.debitInterest, credit: r.creditInterest })
+    setCalculated(true)
+  }
+
+  const grandInterest = interestSummary.debit - interestSummary.credit
+  const totalInterest = grandInterest
+  // Net closing balance = (debit − credit) + (debit interest − credit interest).
+  const netCarry = debit - credit + grandInterest
+
+  const doClose = async () => {
+    if (!onClose || !ledger || !closureDate) return
+    setClosing_(true)
+    try {
+      const r = computeAll(closureDate) // fresh — never trust stale state
+      const net = debit - credit + (r.debitInterest - r.creditInterest)
+      await onClose(ledger.id, closureDate, net)
+    } finally {
+      setClosing_(false)
     }
-    setInterest(next)
+  }
+
+  const resetCalc = () => {
+    setInterest({})
+    setInterestSummary({ debit: 0, credit: 0 })
+    setCalculated(false)
   }
 
   const selectSeason = (id: string) => {
     setSeasonId(id)
     setLedgerId('')
-    setInterest({})
+    resetCalc()
   }
 
   return (
@@ -113,7 +164,7 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose }: Ledge
         <Picker label="Account">
           <select
             value={ledgerId}
-            onChange={(e) => { setLedgerId(e.target.value); setInterest({}) }}
+            onChange={(e) => { setLedgerId(e.target.value); resetCalc() }}
             disabled={!seasonId}
             className="w-52 rounded-md border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-black"
           >
@@ -178,28 +229,89 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose }: Ledge
               value={`₹${inr(Math.abs(grand))} ${grand < 0 ? 'Cr' : 'Dr'}`}
               accent={grand < 0 ? 'green' : 'default'}
             />
-            {closing && <Stat label="Grand Interest" value={`₹${inr(totalInterest)}`} />}
+            {closing && calculated && (
+              <>
+                <Stat label="Debit Interest" value={`₹${inr(interestSummary.debit)}`} />
+                <Stat label="Credit Interest" value={`₹${inr(interestSummary.credit)}`} />
+                <Stat label="Grand Interest" value={`₹${inr(grandInterest)}`} />
+                <Stat
+                  label="Closing Balance"
+                  value={`₹${inr(Math.abs(netCarry))} ${netCarry < 0 ? 'Cr' : 'Dr'}`}
+                  accent={netCarry < 0 ? 'green' : 'default'}
+                />
+              </>
+            )}
           </div>
 
-          {/* Interest panel (closure only) */}
+          {/* Interest + closure panel (closure only) */}
           {closing && (
-            <div className="mb-4 flex flex-wrap items-end gap-5 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
-              <span className="text-sm font-semibold text-amber-800">Accrual Interest</span>
-              <RateField label="Debit %" value={debitRate} onChange={setDebitRate} basis="Days / 365" />
-              <RateField label="Credit %" value={creditRate} onChange={setCreditRate} basis="Days / 360" />
-              <button
-                onClick={calculate}
-                className="flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
-              >
-                <Calculator className="h-4 w-4" /> Calculate
-              </button>
-              <button
-                onClick={() => onClose && closureDate && onClose(ledger.id, closureDate)}
-                disabled={!closureDate || ledger.status === 'closed'}
-                className="flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40"
-              >
-                <Lock className="h-4 w-4" /> {ledger.status === 'closed' ? 'Closed' : 'Close A/C'}
-              </button>
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
+              <div className="flex flex-wrap items-end gap-5">
+                <span className="pb-2 text-sm font-semibold text-amber-800">Accrual Interest</span>
+                <RateField
+                  label="Debit % / month"
+                  value={debitRate}
+                  onChange={(v) => { setDebitRate(v); setCalculated(false) }}
+                  basisValue={debitBasis}
+                  onBasisChange={(b) => { setDebitBasis(b); setCalculated(false) }}
+                />
+                <RateField
+                  label="Credit % / month"
+                  value={creditRate}
+                  onChange={(v) => { setCreditRate(v); setCalculated(false) }}
+                  basisValue={creditBasis}
+                  onBasisChange={(b) => { setCreditBasis(b); setCalculated(false) }}
+                />
+                <button
+                  onClick={calculate}
+                  className="flex items-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+                >
+                  <Calculator className="h-4 w-4" /> Calculate
+                </button>
+
+                {/* Account status — green Open / red Closed (beside Calculate) */}
+                <span
+                  className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${
+                    ledger.status === 'closed' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                  }`}
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  {ledger.status === 'closed' ? 'Closed' : 'Open'}
+                  {ledger.status === 'closed' && ledger.closure_date ? ` · ${fmtDate(ledger.closure_date)}` : ''}
+                </span>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-amber-200 pt-4">
+                {calculated && (
+                  <div className="text-sm text-amber-900">
+                    Closing balance{' '}
+                    <span className="font-semibold">
+                      ₹{inr(Math.abs(netCarry))} {netCarry < 0 ? 'Cr' : 'Dr'}
+                    </span>
+                    <span className="text-amber-700">
+                      {' '}— carries to this customer&apos;s next season automatically when you add them to it.
+                    </span>
+                  </div>
+                )}
+
+                {ledger.status === 'closed' ? (
+                  <button
+                    onClick={() => onReopen && onReopen(ledger.id)}
+                    className="ml-auto flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:border-gray-400"
+                  >
+                    Re-open
+                  </button>
+                ) : (
+                  <button
+                    onClick={doClose}
+                    disabled={!closureDate || closing_}
+                    className="ml-auto flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40"
+                  >
+                    <Lock className="h-4 w-4" />
+                    {closing_ ? 'Closing…' : 'Close A/C'}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -487,12 +599,43 @@ function Stat({ label, value, accent = 'default' }: { label: string; value: stri
   )
 }
 
-function RateField({ label, value, onChange, basis }: { label: string; value: string; onChange: (v: string) => void; basis: string }) {
+function RateField({
+  label,
+  value,
+  onChange,
+  basisValue,
+  onBasisChange,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  basisValue: Basis
+  onBasisChange: (b: Basis) => void
+}) {
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs font-medium text-amber-800">{label}</label>
-      <input value={value} onChange={(e) => onChange(e.target.value)} className="w-20 rounded-md border border-amber-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500" />
-      <span className="text-[10px] text-amber-700">{basis}</span>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="number"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="—"
+          className="w-20 rounded-md border border-amber-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+        />
+        <select
+          value={basisValue}
+          onChange={(e) => onBasisChange(Number(e.target.value) as Basis)}
+          className="rounded-md border border-amber-300 bg-white px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+          title="Day-count basis"
+        >
+          <option value={365}>365 (actual days)</option>
+          <option value={360}>360 (30/360)</option>
+        </select>
+      </div>
+      <span className="text-[10px] text-amber-700">
+        amount × days/30 × rate/100 · {basisValue === 365 ? 'actual day count' : '30/360 day count'}
+      </span>
     </div>
   )
 }
