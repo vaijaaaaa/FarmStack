@@ -43,6 +43,66 @@ export async function POST(request: Request) {
     const body = await request.json()
 
     const seasonId = String(body.season_id ?? '').trim()
+
+    // Bulk: attach many customers to a season at once (Season Ledger Creation).
+    if (Array.isArray(body.customers)) {
+      if (!seasonId) {
+        return NextResponse.json({ error: 'Please select a season' }, { status: 400 })
+      }
+      let created = 0
+      let skipped = 0
+      for (const row of body.customers) {
+        const cid = String(row.customer_id ?? '').trim()
+        if (!cid) {
+          skipped++
+          continue
+        }
+        const dup = await queryOne<{ id: string }>(
+          'SELECT id FROM ledgers WHERE season_id = ? AND customer_id = ?',
+          [seasonId, cid],
+        )
+        if (dup) {
+          skipped++
+          continue
+        }
+        const prior = await queryOne<{ id: string; closing_balance: number }>(
+          `SELECT id, closing_balance FROM ledgers WHERE customer_id = ? AND status = 'closed' AND carried = 0
+           ORDER BY closure_date DESC, created_at DESC LIMIT 1`,
+          [cid],
+        )
+        const opening = prior ? Number(prior.closing_balance) || 0 : 0
+        const lid = newId()
+        const now = nowIso()
+        await transaction((run) => {
+          run(
+            `INSERT INTO ledgers
+              (id, season_id, customer_id, customer_name, user_name, description, acres, credit_limit, display_number, closure_date, opening_balance, closing_balance, carried, status, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              lid,
+              seasonId,
+              cid,
+              String(row.customer_name ?? '').trim(),
+              String(row.user_name ?? '').trim(),
+              String(row.description ?? '').trim(),
+              Number(row.acres) || 0,
+              Number(row.credit_limit) || 0,
+              Number(row.display_number) || 0,
+              String(row.closure_date ?? '').trim(),
+              opening,
+              0,
+              0,
+              'open',
+              now,
+            ],
+          )
+          if (prior) run('UPDATE ledgers SET carried = 1 WHERE id = ?', [prior.id])
+        })
+        created++
+      }
+      return NextResponse.json({ created, skipped }, { status: 201 })
+    }
+
     const customerId = String(body.customer_id ?? '').trim()
     if (!seasonId) {
       return NextResponse.json({ error: 'Please select a season' }, { status: 400 })

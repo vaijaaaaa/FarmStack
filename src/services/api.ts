@@ -94,6 +94,11 @@ export const ledgerApi = {
   },
   create: (payload: Partial<LedgerRecord>) =>
     request<LedgerRecord>('/api/ledgers', { method: 'POST', body: JSON.stringify(payload) }),
+  createBulk: (payload: { season_id: string; customers: Partial<LedgerRecord>[] }) =>
+    request<{ created: number; skipped: number }>('/api/ledgers', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   close: (id: string, closure_date: string, closing_balance: number) =>
     request<{ id: string; status: string; closure_date: string }>('/api/ledgers', {
       method: 'PATCH',

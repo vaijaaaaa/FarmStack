@@ -159,7 +159,16 @@ export function useLedgers() {
     [refresh],
   )
 
-  return { ledgers, loading, error, refresh, createLedger, closeLedger, reopenLedger }
+  const bulkCreateLedgers = useCallback(
+    async (payload: { season_id: string; customers: Partial<LedgerRecord>[] }) => {
+      const res = await ledgerApi.createBulk(payload)
+      await refresh()
+      return res
+    },
+    [refresh],
+  )
+
+  return { ledgers, loading, error, refresh, createLedger, closeLedger, reopenLedger, bulkCreateLedgers }
 }
 
 export function useSuppliers() {

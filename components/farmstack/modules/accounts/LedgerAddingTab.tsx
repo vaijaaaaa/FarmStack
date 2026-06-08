@@ -1,14 +1,20 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Users } from 'lucide-react'
 import { useCustomers } from '@/hooks/useDatabase'
 import type { LedgerRecord, Season } from '@/types/farmstack'
 import SearchableSelect from './SearchableSelect'
+import SeasonLedgerTable from './SeasonLedgerTable'
 
 interface LedgerAddingTabProps {
   seasons: Season[]
+  ledgers: LedgerRecord[]
   onAdd: (payload: Partial<LedgerRecord>) => Promise<unknown>
+  onBulkAdd: (payload: {
+    season_id: string
+    customers: Partial<LedgerRecord>[]
+  }) => Promise<{ created: number; skipped: number }>
 }
 
 const EMPTY = {
@@ -22,11 +28,12 @@ const EMPTY = {
   displayNumber: '',
 }
 
-export default function LedgerAddingTab({ seasons, onAdd }: LedgerAddingTabProps) {
+export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: LedgerAddingTabProps) {
   const { customers } = useCustomers()
   const [form, setForm] = useState(EMPTY)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [showBulk, setShowBulk] = useState(false)
 
   const set = (key: keyof typeof EMPTY, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -74,8 +81,18 @@ export default function LedgerAddingTab({ seasons, onAdd }: LedgerAddingTabProps
   return (
     <div className="flex h-full items-center justify-center pt-3">
       <div className="w-full max-w-xl rounded-xl border border-gray-200 bg-white p-5">
-        <h2 className="text-sm font-semibold text-gray-900">Add Ledger</h2>
-        <p className="mt-0.5 text-xs text-gray-400">Attach a customer to a season.</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Add Ledger</h2>
+            <p className="mt-0.5 text-xs text-gray-400">Attach a customer to a season.</p>
+          </div>
+          <button
+            onClick={() => setShowBulk(true)}
+            className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-400"
+          >
+            <Users className="h-3.5 w-3.5" /> Add All
+          </button>
+        </div>
 
         <div className="mt-3 space-y-2.5">
           <Field label="Season">
@@ -170,6 +187,17 @@ export default function LedgerAddingTab({ seasons, onAdd }: LedgerAddingTabProps
           </button>
         </div>
       </div>
+
+      {showBulk && (
+        <SeasonLedgerTable
+          seasons={seasons}
+          customers={customers}
+          ledgers={ledgers}
+          defaultSeasonId={form.seasonId}
+          onClose={() => setShowBulk(false)}
+          onBulkAdd={onBulkAdd}
+        />
+      )}
     </div>
   )
 }
