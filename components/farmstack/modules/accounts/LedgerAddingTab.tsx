@@ -12,6 +12,7 @@ interface LedgerAddingTabProps {
   seasons: Season[]
   ledgers: LedgerRecord[]
   onAdd: (payload: Partial<LedgerRecord>) => Promise<unknown>
+  onUpdate: (id: string, payload: Partial<LedgerRecord>) => Promise<unknown>
   onBulkAdd: (payload: {
     season_id: string
     customers: Partial<LedgerRecord>[]
@@ -28,7 +29,7 @@ const EMPTY = {
   displayNumber: '',
 }
 
-export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: LedgerAddingTabProps) {
+export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onBulkAdd }: LedgerAddingTabProps) {
   const { customers } = useCustomers()
   const [form, setForm] = useState(EMPTY)
   // The "Account" dropdown — the customer already added to the selected season.
@@ -114,7 +115,7 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
     setSaving(true)
     try {
       const customer = customers.find((c) => c.id === customerId)
-      await onAdd({
+      const payload = {
         season_id: form.seasonId,
         customer_id: customerId,
         customer_name: customer?.name ?? '',
@@ -123,8 +124,17 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
         credit_limit: Number(form.creditLimit) || 0,
         display_number: Number(form.displayNumber) || 0,
         closure_date: form.closureDate,
-      })
-      setAccountCustomerId(customerId) // reflect it in the Account dropdown
+      }
+      if (editing) {
+        const existing = ledgers.find(
+          (l) => l.season_id === form.seasonId && l.customer_id === customerId,
+        )
+        if (existing) await onUpdate(existing.id, payload)
+        else await onAdd(payload)
+      } else {
+        await onAdd(payload)
+      }
+      setAccountCustomerId(customerId)
       setForm((prev) => ({ ...EMPTY, seasonId: prev.seasonId }))
       setMsg({ kind: 'ok', text: `${customer?.name ?? 'Customer'} saved to the season.` })
     } catch (err) {

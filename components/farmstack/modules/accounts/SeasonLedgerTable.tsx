@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { X, Users } from 'lucide-react'
 import type { Customer, LedgerRecord, Season } from '@/types/farmstack'
 import SearchableSelect from './SearchableSelect'
@@ -39,6 +39,11 @@ export default function SeasonLedgerTable({
 }: SeasonLedgerTableProps) {
   const [seasonId, setSeasonId] = useState(defaultSeasonId)
   const [saving, setSaving] = useState(false)
+
+  // Sync when the parent changes the default season while the modal is open.
+  useEffect(() => {
+    setSeasonId(defaultSeasonId)
+  }, [defaultSeasonId])
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [rows, setRows] = useState<BulkRow[]>(() =>
     customers.map((c) => ({

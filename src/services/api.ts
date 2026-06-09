@@ -94,6 +94,8 @@ export const ledgerApi = {
   },
   create: (payload: Partial<LedgerRecord>) =>
     request<LedgerRecord>('/api/ledgers', { method: 'POST', body: JSON.stringify(payload) }),
+  update: (id: string, payload: Partial<LedgerRecord>) =>
+    request<LedgerRecord>('/api/ledgers', { method: 'PUT', body: JSON.stringify({ id, ...payload }) }),
   createBulk: (payload: { season_id: string; customers: Partial<LedgerRecord>[] }) =>
     request<{ created: number; skipped: number }>('/api/ledgers', {
       method: 'POST',

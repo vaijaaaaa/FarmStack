@@ -156,6 +156,7 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
     setInterest({})
     setInterestSummary({ debit: 0, credit: 0 })
     setCalculated(false)
+    setClosureDate(today())
   }
 
   const selectSeason = (id: string) => {

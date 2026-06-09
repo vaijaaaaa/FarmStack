@@ -198,6 +198,35 @@ export async function POST(request: Request) {
   }
 }
 
+// PUT /api/ledgers — update a ledger's detail fields by id.
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json()
+    const id = String(body.id ?? '').trim()
+    if (!id) {
+      return NextResponse.json({ error: 'Ledger id is required' }, { status: 400 })
+    }
+
+    const customerName = String(body.customer_name ?? '').trim()
+    const userName = String(body.user_name ?? '').trim()
+    const description = String(body.description ?? '').trim()
+    const acres = Number(body.acres) || 0
+    const creditLimit = Number(body.credit_limit) || 0
+    const displayNumber = Number(body.display_number) || 0
+    const closureDate = String(body.closure_date ?? '').trim()
+
+    await execute(
+      `UPDATE ledgers SET customer_name = ?, user_name = ?, description = ?, acres = ?,
+         credit_limit = ?, display_number = ?, closure_date = ? WHERE id = ?`,
+      [customerName, userName, description, acres, creditLimit, displayNumber, closureDate, id],
+    )
+    const updated = await queryOne(`SELECT ${COLS} FROM ledgers WHERE id = ?`, [id])
+    return NextResponse.json(updated, { status: 200 })
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
+  }
+}
+
 // PATCH /api/ledgers — close a ledger and (optionally) carry its net balance
 // forward as the opening balance of the same customer in another season.
 // Body: { id, closure_date, carry_to_season_id?, opening_balance? }

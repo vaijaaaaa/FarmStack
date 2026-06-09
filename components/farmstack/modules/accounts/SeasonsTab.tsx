@@ -13,12 +13,21 @@ interface SeasonsTabProps {
 export default function SeasonsTab({ seasons, loading, onAdd }: SeasonsTabProps) {
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const submit = async () => {
+    setError('')
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setError('Season name is required.')
+      return
+    }
     setSaving(true)
     try {
-      await onAdd({ name: name.trim() })
+      await onAdd({ name: trimmed })
       setName('')
+    } catch (err) {
+      setError((err as Error).message)
     } finally {
       setSaving(false)
     }
@@ -46,6 +55,8 @@ export default function SeasonsTab({ seasons, loading, onAdd }: SeasonsTabProps)
               className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
             />
           </div>
+
+          {error && <p className="text-xs text-red-500">{error}</p>}
 
           <button
             onClick={submit}
