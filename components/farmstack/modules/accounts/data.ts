@@ -54,6 +54,9 @@ export function buildLedgerLines(
 
   // Opening balance (only set on the very first season; carry-forward is now an
   // explicit entry, not an opening balance). Dated to ledger creation.
+  // drcr here is the SHOP basis (owed = debit, paid = credit) — this drives the
+  // interest math correctly. The Ledgers screen flips it to the customer view
+  // (owed = credit) at display time only.
   if (ledger.opening_balance && ledger.opening_balance !== 0) {
     const isCredit = ledger.opening_balance < 0
     lines.push({
@@ -66,7 +69,7 @@ export function buildLedgerLines(
     })
   }
 
-  // Sales made under THIS season for this customer → debits.
+  // Sales made under THIS season for this customer → debits (he owes).
   for (const s of sales) {
     if (s.customer_id !== ledger.customer_id) continue
     if ((s.season_id || '') !== ledger.season_id) continue
@@ -81,9 +84,8 @@ export function buildLedgerLines(
     })
   }
 
-  // Entries for this customer in this season → cash = credit, credit = debit.
-  // An entry whose comment mentions O.B / OB / opening / outstanding is treated
-  // as an opening-balance line: grey "O.B" badge and pinned to the top.
+  // Entries: cash = he paid = credit; credit = given on credit = debit.
+  // O.B-marked entries get the grey badge + top pin.
   for (const e of entries) {
     if (e.customer_id !== ledger.customer_id || e.season_id !== ledger.season_id) continue
     const isCash = e.type === 'cash'
@@ -92,7 +94,9 @@ export function buildLedgerLines(
       id: `entry-${e.id}`,
       date: e.date || '',
       kind: isOB ? 'ob' : isCash ? 'cash' : 'credit',
-      drcr: isCash ? 'credit' : 'debit',
+      // An O.B is an outstanding amount the customer owes → always the owed side
+      // (shop debit → shown as Credit in the customer view), whatever type it was.
+      drcr: isOB ? 'debit' : isCash ? 'credit' : 'debit',
       description: isOB
         ? e.comments || 'Opening Balance'
         : `${isCash ? 'Cash' : 'Credit'} entry${e.comments ? ` · ${e.comments}` : ''}`,

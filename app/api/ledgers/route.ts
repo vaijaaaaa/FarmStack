@@ -65,6 +65,15 @@ export async function POST(request: Request) {
           skipped++
           continue
         }
+        // One active account per customer — skip if they already have an open one.
+        const otherOpen = await queryOne<{ id: string }>(
+          "SELECT id FROM ledgers WHERE customer_id = ? AND status = 'open' LIMIT 1",
+          [cid],
+        )
+        if (otherOpen) {
+          skipped++
+          continue
+        }
         await execute(
           `INSERT INTO ledgers
             (id, season_id, customer_id, customer_name, user_name, description, acres, credit_limit, display_number, closure_date, opening_balance, closing_balance, carried, status, created_at)
@@ -123,6 +132,22 @@ export async function POST(request: Request) {
       )
       const updated = await queryOne(`SELECT ${COLS} FROM ledgers WHERE id = ?`, [existing.id])
       return NextResponse.json(updated, { status: 200 })
+    }
+
+    // One ACTIVE (open) account per customer at a time — the current one must be
+    // closed before a new season's account can be opened.
+    const otherOpen = await queryOne<{ name: string }>(
+      `SELECT s.name FROM ledgers l JOIN seasons s ON s.id = l.season_id
+       WHERE l.customer_id = ? AND l.status = 'open' LIMIT 1`,
+      [customerId],
+    )
+    if (otherOpen) {
+      return NextResponse.json(
+        {
+          error: `${customerName || 'This customer'} already has an active account in ${otherOpen.name}. Please close it first.`,
+        },
+        { status: 409 },
+      )
     }
 
     // New ledgers always open at ₹0 — carry-forward is manual.

@@ -25,6 +25,8 @@ interface EntriesGridProps {
   // When set, the grid is for ONE customer (the Name column is locked).
   lockedCustomer?: { id: string; name: string }
   defaultSeasonId?: string
+  // When set, the Season is fixed (read-only) — e.g. adding to an open account.
+  lockedSeasonId?: string
   // Seasons to hide from the dropdown (e.g. the customer's closed accounts).
   excludeSeasonIds?: string[]
   // Called after a successful save so the host can refresh.
@@ -34,6 +36,7 @@ interface EntriesGridProps {
 export default function EntriesGrid({
   lockedCustomer,
   defaultSeasonId = '',
+  lockedSeasonId,
   excludeSeasonIds = [],
   onAdded,
 }: EntriesGridProps) {
@@ -50,7 +53,7 @@ export default function EntriesGrid({
     comments: '',
   })
 
-  const [seasonId, setSeasonId] = useState(defaultSeasonId)
+  const [seasonId, setSeasonId] = useState(lockedSeasonId || defaultSeasonId)
   const [type, setType] = useState<EntryType>('cash')
   const [location, setLocation] = useState('')
   const [rows, setRows] = useState<GridRow[]>([blankRow()])
@@ -182,12 +185,18 @@ export default function EntriesGrid({
 
           <div className="flex w-52 flex-col gap-1.5">
             <span className="text-xs font-medium text-gray-500">Season</span>
-            <SearchableSelect
-              options={seasonOptions}
-              value={seasonId}
-              onChange={setSeasonId}
-              placeholder="— Select season —"
-            />
+            {lockedSeasonId ? (
+              <div className="flex h-9 items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700">
+                {seasons.find((s) => s.id === lockedSeasonId)?.name || '—'}
+              </div>
+            ) : (
+              <SearchableSelect
+                options={seasonOptions}
+                value={seasonId}
+                onChange={setSeasonId}
+                placeholder="— Select season —"
+              />
+            )}
           </div>
 
           <div className="flex w-52 flex-col gap-1.5">

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Plus, Users } from 'lucide-react'
+import { toast } from 'sonner'
 import { useCustomers } from '@/hooks/useDatabase'
 import type { LedgerRecord, Season } from '@/types/farmstack'
 import SearchableSelect from './SearchableSelect'
@@ -98,6 +99,18 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
       setMsg({ kind: 'err', text: 'Please select a user (to add) or an account (to update).' })
       return
     }
+
+    // A customer can only be added ONCE to a season. Adding a User who is already
+    // in this season is blocked (editing via the Account dropdown is allowed).
+    if (
+      form.userId &&
+      ledgers.some((l) => l.season_id === form.seasonId && l.customer_id === form.userId)
+    ) {
+      const name = customers.find((c) => c.id === form.userId)?.name ?? 'This customer'
+      toast.error(`${name} is already in this season`)
+      return
+    }
+
     setSaving(true)
     try {
       const customer = customers.find((c) => c.id === customerId)

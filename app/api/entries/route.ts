@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { query, queryOne, transaction, newId, nowIso } from '@/lib/db'
-import { ensureLedgerExists } from '@/lib/accounts'
+import { ensureLedgerExists, activeSeasonForCustomer } from '@/lib/accounts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -76,19 +76,30 @@ export async function POST(request: Request) {
       )
     }
 
-    // Block adding to a CLOSED account — a closed (season, customer) ledger is frozen.
-    const custIds = [...new Set(entries.map((e: { customer_id: string }) => e.customer_id))]
-    for (const cid of custIds) {
+    // Route every entry to the customer's ACTIVE (earliest-open) account, so all
+    // entries accumulate there until it's closed. Falls back to the picked season
+    // only if the customer has no open account yet.
+    const activeCache = new Map<string, string>()
+    for (const e of entries as { customer_id: string; season_id: string }[]) {
+      if (!activeCache.has(e.customer_id)) {
+        activeCache.set(e.customer_id, (await activeSeasonForCustomer(e.customer_id)) || seasonId)
+      }
+      e.season_id = activeCache.get(e.customer_id) as string
+    }
+
+    // Block adding to a CLOSED account (only reachable via the no-active fallback).
+    const checked = new Set<string>()
+    for (const e of entries as { customer_id: string; customer_name: string; season_id: string }[]) {
+      const key = `${e.season_id}|${e.customer_id}`
+      if (checked.has(key)) continue
+      checked.add(key)
       const closed = await queryOne<{ id: string }>(
         "SELECT id FROM ledgers WHERE season_id = ? AND customer_id = ? AND status = 'closed'",
-        [seasonId, cid as string],
+        [e.season_id, e.customer_id],
       )
       if (closed) {
-        const nm =
-          entries.find((e: { customer_id: string; customer_name: string }) => e.customer_id === cid)
-            ?.customer_name || 'This customer'
         return NextResponse.json(
-          { error: `${nm}'s account for this season is closed — re-open it or choose another season.` },
+          { error: `${e.customer_name || 'This customer'}'s account is closed — open a new season for them first.` },
           { status: 409 },
         )
       }
@@ -116,13 +127,13 @@ export async function POST(request: Request) {
       }
     })
 
-    // Make sure each customer has a ledger in this season, so the entry shows up
-    // in the Accounts ledger (auto-create with carried-forward opening balance).
+    // Make sure each customer has a ledger in their routed season, so the entry
+    // shows up in the Accounts ledger.
     const seen = new Set<string>()
-    for (const e of entries) {
+    for (const e of entries as { customer_id: string; customer_name: string; season_id: string }[]) {
       if (seen.has(e.customer_id)) continue
       seen.add(e.customer_id)
-      await ensureLedgerExists(seasonId, e.customer_id, e.customer_name)
+      await ensureLedgerExists(e.season_id, e.customer_id, e.customer_name)
     }
 
     return NextResponse.json({ created: entries }, { status: 201 })

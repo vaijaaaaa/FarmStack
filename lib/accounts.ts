@@ -2,13 +2,15 @@
 import { queryOne, execute, newId, nowIso } from '@/lib/db'
 
 // The customer's currently ACTIVE (open) season — the ledger their new
-// transactions bind to. Latest open ledger wins; '' if they have none.
+// transactions bind to. The EARLIEST still-open ledger is the active account:
+// everything accumulates there until it's closed, even if the customer has been
+// added to a newer season too. '' if they have no open account.
 export async function activeSeasonForCustomer(customerId: string): Promise<string> {
   if (!customerId) return ''
   const row = await queryOne<{ season_id: string }>(
     `SELECT season_id FROM ledgers
      WHERE customer_id = ? AND status = 'open'
-     ORDER BY created_at DESC LIMIT 1`,
+     ORDER BY created_at ASC LIMIT 1`,
     [customerId],
   )
   return row?.season_id ?? ''
