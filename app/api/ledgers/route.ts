@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { query, queryOne, execute, transaction, newId, nowIso } from '@/lib/db'
+import { query, queryOne, execute, newId, nowIso } from '@/lib/db'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,39 +65,28 @@ export async function POST(request: Request) {
           skipped++
           continue
         }
-        const prior = await queryOne<{ id: string; closing_balance: number }>(
-          `SELECT id, closing_balance FROM ledgers WHERE customer_id = ? AND status = 'closed' AND carried = 0
-           ORDER BY closure_date DESC, created_at DESC LIMIT 1`,
-          [cid],
+        await execute(
+          `INSERT INTO ledgers
+            (id, season_id, customer_id, customer_name, user_name, description, acres, credit_limit, display_number, closure_date, opening_balance, closing_balance, carried, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            newId(),
+            seasonId,
+            cid,
+            String(row.customer_name ?? '').trim(),
+            String(row.user_name ?? '').trim(),
+            String(row.description ?? '').trim(),
+            Number(row.acres) || 0,
+            Number(row.credit_limit) || 0,
+            Number(row.display_number) || 0,
+            String(row.closure_date ?? '').trim(),
+            0,
+            0,
+            0,
+            'open',
+            nowIso(),
+          ],
         )
-        const opening = prior ? Number(prior.closing_balance) || 0 : 0
-        const lid = newId()
-        const now = nowIso()
-        await transaction((run) => {
-          run(
-            `INSERT INTO ledgers
-              (id, season_id, customer_id, customer_name, user_name, description, acres, credit_limit, display_number, closure_date, opening_balance, closing_balance, carried, status, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              lid,
-              seasonId,
-              cid,
-              String(row.customer_name ?? '').trim(),
-              String(row.user_name ?? '').trim(),
-              String(row.description ?? '').trim(),
-              Number(row.acres) || 0,
-              Number(row.credit_limit) || 0,
-              Number(row.display_number) || 0,
-              String(row.closure_date ?? '').trim(),
-              opening,
-              0,
-              0,
-              'open',
-              now,
-            ],
-          )
-          if (prior) run('UPDATE ledgers SET carried = 1 WHERE id = ?', [prior.id])
-        })
         created++
       }
       return NextResponse.json({ created, skipped }, { status: 201 })
@@ -108,80 +97,77 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Please select a season' }, { status: 400 })
     }
     if (!customerId) {
-      return NextResponse.json({ error: 'Please select an account (customer)' }, { status: 400 })
+      return NextResponse.json({ error: 'Please select a user or account (customer)' }, { status: 400 })
     }
 
-    // One ledger per (season, customer).
+    // Editable detail fields (shared by insert + update).
+    const customerName = String(body.customer_name ?? '').trim()
+    const userName = String(body.user_name ?? '').trim()
+    const description = String(body.description ?? '').trim()
+    const acres = Number(body.acres) || 0
+    const creditLimit = Number(body.credit_limit) || 0
+    const displayNumber = Number(body.display_number) || 0
+    const closureDate = String(body.closure_date ?? '').trim()
+
+    // Upsert: one ledger per (season, customer). If it already exists, update its
+    // details (acres / loyalty / display number / etc.); otherwise create it.
     const existing = await queryOne<{ id: string }>(
       'SELECT id FROM ledgers WHERE season_id = ? AND customer_id = ?',
       [seasonId, customerId],
     )
     if (existing) {
-      return NextResponse.json(
-        { error: 'This customer is already added to the selected season' },
-        { status: 409 },
+      await execute(
+        `UPDATE ledgers SET customer_name = ?, user_name = ?, description = ?, acres = ?,
+           credit_limit = ?, display_number = ?, closure_date = ? WHERE id = ?`,
+        [customerName, userName, description, acres, creditLimit, displayNumber, closureDate, existing.id],
       )
+      const updated = await queryOne(`SELECT ${COLS} FROM ledgers WHERE id = ?`, [existing.id])
+      return NextResponse.json(updated, { status: 200 })
     }
 
-    // Auto carry-forward: if this customer has a CLOSED ledger whose balance
-    // hasn't been carried yet, its closing balance becomes this ledger's
-    // opening balance (and that prior ledger is marked carried so it's used once).
-    const prior = await queryOne<{ id: string; closing_balance: number }>(
-      `SELECT id, closing_balance FROM ledgers
-       WHERE customer_id = ? AND status = 'closed' AND carried = 0
-       ORDER BY closure_date DESC, created_at DESC
-       LIMIT 1`,
-      [customerId],
-    )
-    const openingBalance = prior ? Number(prior.closing_balance) || 0 : Number(body.opening_balance) || 0
-
+    // New ledgers always open at ₹0 — carry-forward is manual.
     const ledger = {
       id: newId(),
       season_id: seasonId,
       customer_id: customerId,
-      customer_name: String(body.customer_name ?? '').trim(),
-      user_name: String(body.user_name ?? '').trim(),
-      description: String(body.description ?? '').trim(),
-      acres: Number(body.acres) || 0,
-      credit_limit: Number(body.credit_limit) || 0,
-      display_number: Number(body.display_number) || 0,
-      closure_date: String(body.closure_date ?? '').trim(),
-      opening_balance: openingBalance,
+      customer_name: customerName,
+      user_name: userName,
+      description,
+      acres,
+      credit_limit: creditLimit,
+      display_number: displayNumber,
+      closure_date: closureDate,
+      opening_balance: 0,
       closing_balance: 0,
       carried: 0,
       status: 'open',
       created_at: nowIso(),
     }
 
-    await transaction((run) => {
-      run(
-        `INSERT INTO ledgers
-          (id, season_id, customer_id, customer_name, user_name, description, acres, credit_limit, display_number, closure_date, opening_balance, closing_balance, carried, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          ledger.id,
-          ledger.season_id,
-          ledger.customer_id,
-          ledger.customer_name,
-          ledger.user_name,
-          ledger.description,
-          ledger.acres,
-          ledger.credit_limit,
-          ledger.display_number,
-          ledger.closure_date,
-          ledger.opening_balance,
-          ledger.closing_balance,
-          ledger.carried,
-          ledger.status,
-          ledger.created_at,
-        ],
-      )
-      if (prior) {
-        run('UPDATE ledgers SET carried = 1 WHERE id = ?', [prior.id])
-      }
-    })
+    await execute(
+      `INSERT INTO ledgers
+        (id, season_id, customer_id, customer_name, user_name, description, acres, credit_limit, display_number, closure_date, opening_balance, closing_balance, carried, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        ledger.id,
+        ledger.season_id,
+        ledger.customer_id,
+        ledger.customer_name,
+        ledger.user_name,
+        ledger.description,
+        ledger.acres,
+        ledger.credit_limit,
+        ledger.display_number,
+        ledger.closure_date,
+        ledger.opening_balance,
+        ledger.closing_balance,
+        ledger.carried,
+        ledger.status,
+        ledger.created_at,
+      ],
+    )
 
-    return NextResponse.json({ ...ledger, carried_from: prior?.id ?? null }, { status: 201 })
+    return NextResponse.json(ledger, { status: 201 })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }

@@ -3,6 +3,7 @@ import { query, queryOne, execute, transaction, newId, nowIso } from '@/lib/db'
 import { syncSalesInvoice } from '@/lib/tally/tallySyncService'
 import { setTallyUrlForRequest } from '@/lib/tally/tallyContext'
 import { getStockMap } from '@/lib/stock'
+import { activeSeasonForCustomer } from '@/lib/accounts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -149,14 +150,18 @@ export async function POST(request: Request) {
     }
     const initialStatus = tallySyncEnabled ? 'pending' : 'not_synced'
 
+    // Bind this sale to the customer's currently ACTIVE (open) season ledger so
+    // it shows only in that account (not in every season). '' if they have none.
+    const seasonId = await activeSeasonForCustomer(customerId)
+
     await transaction((run) => {
       run(
         `INSERT INTO sales_invoices
-          (id, invoice_number, customer_id, customer_name, tally_name, narration, date, sale_type, total, status,
+          (id, invoice_number, customer_id, customer_name, tally_name, narration, season_id, date, sale_type, total, status,
            eway_bill_no, eway_bill_date, dispatch_from, ship_to, transporter_name, transporter_id,
            transport_mode, transport_doc_no, transport_doc_date, vehicle_number, vehicle_type,
            tally_sync_enabled, tally_sync_status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           invoiceNumber,
@@ -164,6 +169,7 @@ export async function POST(request: Request) {
           String(body.customer_name ?? ''),
           String(body.tally_name ?? ''),
           String(body.narration ?? ''),
+          seasonId,
           String(body.date ?? ''),
           saleType,
           total,
@@ -208,6 +214,7 @@ export async function POST(request: Request) {
         customer_name: body.customer_name ?? '',
         tally_name: body.tally_name ?? '',
         narration: body.narration ?? '',
+        season_id: seasonId,
         date: body.date ?? '',
         sale_type: saleType,
         items: builtItems,

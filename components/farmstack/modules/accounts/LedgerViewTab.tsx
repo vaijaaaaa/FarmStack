@@ -1,9 +1,10 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, Lock, X, Calculator, BookOpen } from 'lucide-react'
 import { useSalesInvoices, useEntries, useProducts } from '@/hooks/useDatabase'
-import type { LedgerRecord, Season, SalesInvoice, EntryType } from '@/types/farmstack'
+import type { LedgerRecord, Season, SalesInvoice } from '@/types/farmstack'
+import EntriesGrid from '../EntriesGrid'
 import {
   buildLedgerLines,
   totalsFor,
@@ -17,7 +18,6 @@ import {
 } from './data'
 
 interface LedgerViewTabProps {
-  mode: 'display' | 'closure'
   seasons: Season[]
   ledgers: LedgerRecord[]
   onClose?: (
@@ -26,6 +26,7 @@ interface LedgerViewTabProps {
     closingBalance: number,
   ) => Promise<void> | void
   onReopen?: (ledgerId: string) => Promise<void> | void
+  onDataChanged?: () => void
 }
 
 type OptionFilter = 'all' | 'debit' | 'credit'
@@ -41,11 +42,24 @@ const KIND_BADGE: Record<LineKind, { label: string; cls: string }> = {
   credit: { label: 'Credit', cls: 'bg-amber-100 text-amber-700' },
 }
 
-export default function LedgerViewTab({ mode, seasons, ledgers, onClose, onReopen }: LedgerViewTabProps) {
-  const closing = mode === 'closure'
+export default function LedgerViewTab({ seasons, ledgers, onClose, onReopen, onDataChanged }: LedgerViewTabProps) {
+  // Interest / closure controls are hidden until toggled with Ctrl+I.
+  const [closureMode, setClosureMode] = useState(false)
+  const closing = closureMode
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && (e.key === 'i' || e.key === 'I')) {
+        e.preventDefault()
+        setClosureMode((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   const { invoices } = useSalesInvoices()
-  const { entries, createEntries } = useEntries()
+  const { entries, refresh: refreshEntries } = useEntries()
   const { products } = useProducts()
 
   const [seasonId, setSeasonId] = useState('')
@@ -119,6 +133,8 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose, onReope
   // Net closing balance = (debit − credit) + (debit interest − credit interest).
   const netCarry = debit - credit + grandInterest
 
+  // Close the account. Carrying the outstanding forward is done manually via the
+  // Add Entry button (pick the next season + the outstanding as O.B).
   const doClose = async () => {
     if (!onClose || !ledger || !closureDate) return
     setClosing_(true)
@@ -188,12 +204,25 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose, onReope
           </Picker>
         )}
 
-        {ledger && !closing && (
+        {ledger && (
           <button
             onClick={() => setShowEntry(true)}
             className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-gray-400"
           >
             <Plus className="h-4 w-4" /> Add Entry
+          </button>
+        )}
+
+        {ledger && (
+          <button
+            onClick={() => setClosureMode((v) => !v)}
+            className={`flex items-center gap-1.5 rounded-md border px-3 py-2 text-xs font-medium ${
+              closing ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-gray-200 bg-white text-gray-400 hover:border-gray-300'
+            }`}
+            title="Toggle interest & closure (Ctrl+I)"
+          >
+            <Calculator className="h-3.5 w-3.5" /> Interest / Close
+            <kbd className="ml-1 rounded border border-current/30 px-1 font-mono text-[10px] opacity-70">Ctrl+I</kbd>
           </button>
         )}
 
@@ -288,7 +317,7 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose, onReope
                       ₹{inr(Math.abs(netCarry))} {netCarry < 0 ? 'Cr' : 'Dr'}
                     </span>
                     <span className="text-amber-700">
-                      {' '}— carries to this customer&apos;s next season automatically when you add them to it.
+                      {' '}— use Add Entry to carry it into the next season as O.B.
                     </span>
                   </div>
                 )}
@@ -383,29 +412,33 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose, onReope
         </>
       )}
 
-      {/* Add Entry (cash/credit) — persists to this customer + season */}
+      {/* Add Entry — the Entries-page grid in a modal, locked to this customer.
+          Pick the season; closed seasons are excluded so you can carry the
+          outstanding into the next season as O.B. */}
       {showEntry && ledger && (
-        <AddEntryModal
-          account={ledger.customer_name}
-          onClose={() => setShowEntry(false)}
-          onSave={async ({ type, date, amount, comments }) => {
-            await createEntries({
-              season_id: ledger.season_id,
-              type,
-              location: '',
-              rows: [
-                {
-                  customer_id: ledger.customer_id,
-                  customer_name: ledger.customer_name,
-                  date,
-                  amount,
-                  comments,
-                },
-              ],
-            })
-            setShowEntry(false)
-          }}
-        />
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
+            <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-5 py-4">
+              <h3 className="text-sm font-semibold text-gray-800">Add Entry · {ledger.customer_name}</h3>
+              <button onClick={() => setShowEntry(false)} className="text-gray-400 hover:text-gray-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-5">
+              <EntriesGrid
+                lockedCustomer={{ id: ledger.customer_id, name: ledger.customer_name }}
+                defaultSeasonId={ledger.status === 'closed' ? '' : ledger.season_id}
+                excludeSeasonIds={ledgers
+                  .filter((l) => l.customer_id === ledger.customer_id && l.status === 'closed')
+                  .map((l) => l.season_id)}
+                onAdded={() => {
+                  refreshEntries()
+                  onDataChanged?.()
+                }}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Sale details popup */}
@@ -416,81 +449,7 @@ export default function LedgerViewTab({ mode, seasons, ledgers, onClose, onReope
           onClose={() => setSaleDetail(null)}
         />
       )}
-    </div>
-  )
-}
 
-// ── Add Entry modal ────────────────────────────────────────────────────────
-function AddEntryModal({
-  account,
-  onClose,
-  onSave,
-}: {
-  account: string
-  onClose: () => void
-  onSave: (v: { type: EntryType; date: string; amount: number; comments: string }) => Promise<void>
-}) {
-  const [type, setType] = useState<EntryType>('cash')
-  const [date, setDate] = useState(today())
-  const [comments, setComments] = useState('')
-  const [amount, setAmount] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const save = async () => {
-    if (!amount) return
-    setSaving(true)
-    try {
-      await onSave({ type, date, amount: Number(amount), comments: comments.trim() })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white">
-        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
-          <h3 className="text-sm font-semibold text-gray-800">Add Entry · {account}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X className="h-4 w-4" /></button>
-        </div>
-
-        <div className="space-y-4 p-5">
-          <div className="flex gap-2">
-            {(['cash', 'credit'] as EntryType[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setType(t)}
-                className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium capitalize ${
-                  type === t ? 'border-black bg-black text-white' : 'border-gray-300 bg-white text-gray-600'
-                }`}
-              >
-                {t === 'cash' ? 'Cash (received)' : 'Credit (given)'}
-              </button>
-            ))}
-          </div>
-
-          <FieldRow label="Date">
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={modalInput} />
-          </FieldRow>
-          <FieldRow label="Amount">
-            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" className={modalInput} />
-          </FieldRow>
-          <FieldRow label="Comments">
-            <input value={comments} onChange={(e) => setComments(e.target.value)} placeholder="Optional note" className={modalInput} />
-          </FieldRow>
-        </div>
-
-        <div className="flex justify-end gap-2 border-t border-gray-100 px-5 py-4">
-          <button onClick={onClose} className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-600 hover:border-gray-400">Cancel</button>
-          <button
-            onClick={save}
-            disabled={!amount || saving}
-            className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40"
-          >
-            {saving ? 'Adding…' : 'Add'}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }
@@ -568,19 +527,7 @@ function SalesDetailModal({
 }
 
 // ── Small presentational helpers ────────────────────────────────────────────
-const modalInput =
-  'w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black'
-
 function Picker({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-gray-500">{label}</label>
-      {children}
-    </div>
-  )
-}
-
-function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs font-medium text-gray-500">{label}</label>

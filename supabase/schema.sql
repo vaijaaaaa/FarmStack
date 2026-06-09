@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS sales_invoices (
   customer_name TEXT DEFAULT '',
   tally_name TEXT DEFAULT '',
   narration TEXT DEFAULT '',   -- free-text label to identify who a (cash) sale was for
+  season_id TEXT DEFAULT '',   -- the customer's ACTIVE (open) season ledger when the sale was made
   date TEXT DEFAULT '',
   sale_type TEXT DEFAULT 'cash',
   total REAL DEFAULT 0,

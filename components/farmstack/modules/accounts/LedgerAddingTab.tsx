@@ -57,7 +57,31 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
   )
 
   const changeSeason = (v: string) => {
-    set('seasonId', v)
+    setForm((prev) => ({ ...EMPTY, seasonId: v }))
+    setAccountCustomerId('')
+    setMsg(null)
+  }
+
+  // Selecting an existing Account loads its details for editing (and clears User).
+  const selectAccount = (cid: string) => {
+    setAccountCustomerId(cid)
+    setMsg(null)
+    if (!cid) return
+    const lg = ledgers.find((l) => l.season_id === form.seasonId && l.customer_id === cid)
+    setForm((prev) => ({
+      ...prev,
+      userId: '',
+      description: lg?.description ?? '',
+      acres: lg ? String(lg.acres ?? 0) : '',
+      closureDate: lg?.closure_date ?? '',
+      creditLimit: lg ? String(lg.credit_limit ?? 0) : '',
+      displayNumber: lg ? String(lg.display_number ?? 0) : '',
+    }))
+  }
+
+  // Selecting a User (new customer) clears the Account selection.
+  const selectUser = (v: string) => {
+    set('userId', v)
     setAccountCustomerId('')
     setMsg(null)
   }
@@ -68,16 +92,18 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
       setMsg({ kind: 'err', text: 'Please select a season.' })
       return
     }
-    if (!form.userId) {
-      setMsg({ kind: 'err', text: 'Please select a user (customer).' })
+    // The customer is whichever is chosen — a new User, or an existing Account.
+    const customerId = form.userId || accountCustomerId
+    if (!customerId) {
+      setMsg({ kind: 'err', text: 'Please select a user (to add) or an account (to update).' })
       return
     }
     setSaving(true)
     try {
-      const customer = customers.find((c) => c.id === form.userId)
+      const customer = customers.find((c) => c.id === customerId)
       await onAdd({
         season_id: form.seasonId,
-        customer_id: form.userId,
+        customer_id: customerId,
         customer_name: customer?.name ?? '',
         description: form.description,
         acres: Number(form.acres) || 0,
@@ -85,16 +111,17 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
         display_number: Number(form.displayNumber) || 0,
         closure_date: form.closureDate,
       })
-      // Show the just-added customer in the Account dropdown.
-      setAccountCustomerId(form.userId)
+      setAccountCustomerId(customerId) // reflect it in the Account dropdown
       setForm((prev) => ({ ...EMPTY, seasonId: prev.seasonId }))
-      setMsg({ kind: 'ok', text: `${customer?.name ?? 'Customer'} added to the season.` })
+      setMsg({ kind: 'ok', text: `${customer?.name ?? 'Customer'} saved to the season.` })
     } catch (err) {
       setMsg({ kind: 'err', text: (err as Error).message })
     } finally {
       setSaving(false)
     }
   }
+
+  const editing = !!accountCustomerId && !form.userId
 
   return (
     <div className="flex h-full items-center justify-center pt-3">
@@ -130,7 +157,7 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
               <SearchableSelect
                 options={accountOptions}
                 value={accountCustomerId}
-                onChange={setAccountCustomerId}
+                onChange={selectAccount}
                 placeholder={form.seasonId ? '— Accounts —' : '— Select season —'}
               />
             </Field>
@@ -138,7 +165,7 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
               <SearchableSelect
                 options={userOptions}
                 value={form.userId}
-                onChange={(v) => set('userId', v)}
+                onChange={selectUser}
                 placeholder="— Select customer —"
               />
             </Field>
@@ -204,7 +231,7 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd }: 
             disabled={saving}
             className="mt-1 flex w-full items-center justify-center gap-2 rounded-md bg-black py-2.5 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-50"
           >
-            <Plus className="h-4 w-4" /> {saving ? 'Adding…' : 'Add'}
+            <Plus className="h-4 w-4" /> {saving ? 'Saving…' : editing ? 'Update' : 'Add'}
           </button>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { query, transaction, newId, nowIso } from '@/lib/db'
+import { query, queryOne, transaction, newId, nowIso } from '@/lib/db'
 import { ensureLedgerExists } from '@/lib/accounts'
 
 export const runtime = 'nodejs'
@@ -74,6 +74,24 @@ export async function POST(request: Request) {
         { error: 'Add at least one row with a customer and an amount' },
         { status: 400 },
       )
+    }
+
+    // Block adding to a CLOSED account — a closed (season, customer) ledger is frozen.
+    const custIds = [...new Set(entries.map((e: { customer_id: string }) => e.customer_id))]
+    for (const cid of custIds) {
+      const closed = await queryOne<{ id: string }>(
+        "SELECT id FROM ledgers WHERE season_id = ? AND customer_id = ? AND status = 'closed'",
+        [seasonId, cid as string],
+      )
+      if (closed) {
+        const nm =
+          entries.find((e: { customer_id: string; customer_name: string }) => e.customer_id === cid)
+            ?.customer_name || 'This customer'
+        return NextResponse.json(
+          { error: `${nm}'s account for this season is closed — re-open it or choose another season.` },
+          { status: 409 },
+        )
+      }
     }
 
     await transaction((run) => {

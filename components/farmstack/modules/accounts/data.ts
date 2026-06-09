@@ -43,8 +43,8 @@ export function fmtDate(s: string): string {
 }
 
 // Compose the ledger lines for one customer-in-a-season from sales + entries.
-// Seasons are plain labels (not date-bound), so a customer's sales are matched
-// by customer only here. (Season ↔ transaction binding is handled separately.)
+// A transaction belongs to the season it was created under (its season_id), so
+// a sale/entry shows in exactly one season's ledger — the active one at the time.
 export function buildLedgerLines(
   ledger: LedgerRecord,
   sales: SalesInvoice[],
@@ -52,8 +52,8 @@ export function buildLedgerLines(
 ): LedgerLine[] {
   const lines: LedgerLine[] = []
 
-  // Opening balance carried from a prior season's closure. Dated to when the
-  // ledger was created so it can still accrue interest across the season.
+  // Opening balance (only set on the very first season; carry-forward is now an
+  // explicit entry, not an opening balance). Dated to ledger creation.
   if (ledger.opening_balance && ledger.opening_balance !== 0) {
     const isCredit = ledger.opening_balance < 0
     lines.push({
@@ -66,9 +66,10 @@ export function buildLedgerLines(
     })
   }
 
-  // Sales for this customer → debits (customer owes for goods bought).
+  // Sales made under THIS season for this customer → debits.
   for (const s of sales) {
     if (s.customer_id !== ledger.customer_id) continue
+    if ((s.season_id || '') !== ledger.season_id) continue
     lines.push({
       id: `sale-${s.id}`,
       date: s.date || s.created_at || '',
@@ -81,23 +82,29 @@ export function buildLedgerLines(
   }
 
   // Entries for this customer in this season → cash = credit, credit = debit.
+  // An entry whose comment mentions O.B / OB / opening / outstanding is treated
+  // as an opening-balance line: grey "O.B" badge and pinned to the top.
   for (const e of entries) {
     if (e.customer_id !== ledger.customer_id || e.season_id !== ledger.season_id) continue
     const isCash = e.type === 'cash'
+    const isOB = /\bo\.?\s*b\b|opening|outstanding/i.test(e.comments || '')
     lines.push({
       id: `entry-${e.id}`,
       date: e.date || '',
-      kind: isCash ? 'cash' : 'credit',
+      kind: isOB ? 'ob' : isCash ? 'cash' : 'credit',
       drcr: isCash ? 'credit' : 'debit',
-      description: `${isCash ? 'Cash' : 'Credit'} entry${e.comments ? ` · ${e.comments}` : ''}`,
+      description: isOB
+        ? e.comments || 'Opening Balance'
+        : `${isCash ? 'Cash' : 'Credit'} entry${e.comments ? ` · ${e.comments}` : ''}`,
       amount: Number(e.amount) || 0,
     })
   }
 
-  // Chronological, but the opening balance is always pinned first.
+  // O.B lines always come first; everything else chronological.
   lines.sort((a, b) => {
-    if (a.kind === 'ob') return -1
-    if (b.kind === 'ob') return 1
+    const aOb = a.kind === 'ob' ? 0 : 1
+    const bOb = b.kind === 'ob' ? 0 : 1
+    if (aOb !== bOb) return aOb - bOb
     const da = parseLedgerDate(a.date)?.getTime() ?? -Infinity
     const db = parseLedgerDate(b.date)?.getTime() ?? -Infinity
     return da - db

@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { Language } from '@/types/farmstack'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { CalendarDays, UserPlus, Eye, Lock } from 'lucide-react'
+import { CalendarDays, UserPlus, Eye } from 'lucide-react'
 import { useSeasons, useLedgers } from '@/hooks/useDatabase'
 import SeasonsTab from './accounts/SeasonsTab'
 import LedgerAddingTab from './accounts/LedgerAddingTab'
@@ -16,8 +16,7 @@ interface AccountsModuleProps {
 const TABS = [
   { value: 'season', label: 'Season', shortcut: '1', icon: CalendarDays },
   { value: 'ledger-adding', label: 'Ledger Adding', shortcut: '2', icon: UserPlus },
-  { value: 'ledger-display', label: 'Ledger Display', shortcut: '3', icon: Eye },
-  { value: 'ledger-closure', label: 'Ledger Closure', shortcut: '4', icon: Lock },
+  { value: 'ledgers', label: 'Ledgers', shortcut: '3', icon: Eye },
 ] as const
 
 export default function AccountsModule({ language }: AccountsModuleProps) {
@@ -79,13 +78,8 @@ export default function AccountsModule({ language }: AccountsModuleProps) {
           <LedgerAddingTab seasons={seasons} ledgers={ledgers} onAdd={createLedger} onBulkAdd={bulkCreateLedgers} />
         </TabsContent>
 
-        <TabsContent value="ledger-display" className="min-h-0 flex-1 overflow-auto">
-          <LedgerViewTab mode="display" seasons={seasons} ledgers={ledgers} />
-        </TabsContent>
-
-        <TabsContent value="ledger-closure" className="min-h-0 flex-1 overflow-auto">
+        <TabsContent value="ledgers" className="min-h-0 flex-1 overflow-auto">
           <LedgerViewTab
-            mode="closure"
             seasons={seasons}
             ledgers={ledgers}
             onClose={async (id, date, closingBalance) => {
@@ -96,6 +90,7 @@ export default function AccountsModule({ language }: AccountsModuleProps) {
               await reopenLedger(id)
               await refreshLedgers()
             }}
+            onDataChanged={refreshLedgers}
           />
         </TabsContent>
       </Tabs>
