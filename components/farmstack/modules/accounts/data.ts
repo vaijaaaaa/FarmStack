@@ -52,22 +52,10 @@ export function buildLedgerLines(
 ): LedgerLine[] {
   const lines: LedgerLine[] = []
 
-  // Opening balance (only set on the very first season; carry-forward is now an
-  // explicit entry, not an opening balance). Dated to ledger creation.
-  // drcr here is the SHOP basis (owed = debit, paid = credit) — this drives the
-  // interest math correctly. The Ledgers screen flips it to the customer view
-  // (owed = credit) at display time only.
-  if (ledger.opening_balance && ledger.opening_balance !== 0) {
-    const isCredit = ledger.opening_balance < 0
-    lines.push({
-      id: `ob-${ledger.id}`,
-      date: ledger.created_at || '',
-      kind: 'ob',
-      drcr: isCredit ? 'credit' : 'debit',
-      description: 'Opening Balance',
-      amount: Math.abs(ledger.opening_balance),
-    })
-  }
+  // Carry-forward is fully manual: a carried balance is entered as an "O.B" cash/
+  // credit entry (handled below), NOT via ledger.opening_balance. The stored
+  // opening_balance is no longer rendered here, so a carried balance is counted
+  // exactly once (single source of truth = the O.B entry).
 
   // Sales made under THIS season for this customer → debits (he owes).
   for (const s of sales) {

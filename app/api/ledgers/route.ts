@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { query, queryOne, execute, transaction, newId, nowIso } from '@/lib/db'
+import { claimOrphanTransactions } from '@/lib/accounts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -89,6 +90,8 @@ export async function POST(request: Request) {
             nowIso(),
           ],
         )
+        // Adopt this customer's untagged sales/entries into their active season.
+        await claimOrphanTransactions(cid)
         created++
       }
       return NextResponse.json({ created, skipped }, { status: 201 })
@@ -111,20 +114,17 @@ export async function POST(request: Request) {
     const displayNumber = Number(body.display_number) || 0
     const closureDate = String(body.closure_date ?? '').trim()
 
-    // Upsert: one ledger per (season, customer). If it already exists, update its
-    // details (acres / loyalty / display number / etc.); otherwise create it.
+    // One ledger per (season, customer), created ONCE — there is no update path.
+    // Re-adding the same customer to a season is rejected.
     const existing = await queryOne<{ id: string }>(
       'SELECT id FROM ledgers WHERE season_id = ? AND customer_id = ?',
       [seasonId, customerId],
     )
     if (existing) {
-      await execute(
-        `UPDATE ledgers SET customer_name = ?, user_name = ?, description = ?, acres = ?,
-           credit_limit = ?, display_number = ?, closure_date = ? WHERE id = ?`,
-        [customerName, userName, description, acres, creditLimit, displayNumber, closureDate, existing.id],
+      return NextResponse.json(
+        { error: `${customerName || 'This customer'} already has an account in this season.` },
+        { status: 409 },
       )
-      const updated = await queryOne(`SELECT ${COLS} FROM ledgers WHERE id = ?`, [existing.id])
-      return NextResponse.json(updated, { status: 200 })
     }
 
     // A customer may be attached to several seasons (multiple accounts). Only the
@@ -172,6 +172,9 @@ export async function POST(request: Request) {
         ledger.created_at,
       ],
     )
+
+    // Adopt this customer's untagged sales/entries into their active season.
+    await claimOrphanTransactions(customerId)
 
     return NextResponse.json(ledger, { status: 201 })
   } catch (err) {
@@ -320,6 +323,44 @@ export async function PATCH(request: Request) {
       closure_date: closureDate,
       closing_balance: closingBalance,
     })
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
+  }
+}
+
+// DELETE /api/ledgers?id=... — remove a customer's account from a season.
+// Deletes the ledger row and its cash/credit entries, and untags its sales
+// invoices (season_id → '') so the invoices survive and can be re-adopted if the
+// customer is added to a season again.
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const id = (searchParams.get('id') ?? '').trim()
+    if (!id) {
+      return NextResponse.json({ error: 'Ledger id is required' }, { status: 400 })
+    }
+
+    const ledger = await queryOne<{ season_id: string; customer_id: string }>(
+      'SELECT season_id, customer_id FROM ledgers WHERE id = ?',
+      [id],
+    )
+    if (!ledger) {
+      return NextResponse.json({ error: 'Account not found' }, { status: 404 })
+    }
+
+    await transaction((run) => {
+      run('DELETE FROM ledgers WHERE id = ?', [id])
+      run('DELETE FROM entries WHERE season_id = ? AND customer_id = ?', [
+        ledger.season_id,
+        ledger.customer_id,
+      ])
+      run("UPDATE sales_invoices SET season_id = '' WHERE season_id = ? AND customer_id = ?", [
+        ledger.season_id,
+        ledger.customer_id,
+      ])
+    })
+
+    return NextResponse.json({ deleted: true, id })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }

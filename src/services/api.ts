@@ -121,6 +121,10 @@ export const ledgerApi = {
       '/api/ledgers',
       { method: 'PATCH', body: JSON.stringify({ action: 'move', ...payload }) },
     ),
+  remove: (id: string) =>
+    request<{ deleted: boolean; id: string }>(`/api/ledgers?id=${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 }
 
 export const supplierApi = {

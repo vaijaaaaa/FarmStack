@@ -22,7 +22,7 @@ const TABS = [
 export default function AccountsModule({ language }: AccountsModuleProps) {
   const tabsRef = useRef<HTMLDivElement>(null)
   const { seasons, loading: seasonsLoading, createSeason } = useSeasons()
-  const { ledgers, createLedger, closeLedger, bulkCreateLedgers, moveLedger, refresh: refreshLedgers } = useLedgers()
+  const { ledgers, createLedger, closeLedger, bulkCreateLedgers, moveLedger, deleteLedger, refresh: refreshLedgers } = useLedgers()
 
   // Number-key tab shortcuts (same UX as AnalyticsModule)
   useEffect(() => {
@@ -75,7 +75,7 @@ export default function AccountsModule({ language }: AccountsModuleProps) {
         </TabsContent>
 
         <TabsContent value="ledger-adding" className="min-h-0 flex-1 overflow-hidden">
-          <LedgerAddingTab seasons={seasons} ledgers={ledgers} onAdd={createLedger} onBulkAdd={bulkCreateLedgers} onMove={moveLedger} />
+          <LedgerAddingTab seasons={seasons} ledgers={ledgers} onAdd={createLedger} onBulkAdd={bulkCreateLedgers} onMove={moveLedger} onDelete={deleteLedger} />
         </TabsContent>
 
         <TabsContent value="ledgers" className="min-h-0 flex-1 overflow-auto">

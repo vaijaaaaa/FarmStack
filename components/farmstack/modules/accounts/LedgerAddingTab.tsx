@@ -23,6 +23,7 @@ interface LedgerAddingTabProps {
     to_customer_id: string
     to_customer_name: string
   }) => Promise<unknown>
+  onDelete: (id: string) => Promise<unknown>
 }
 
 const EMPTY = {
@@ -35,7 +36,7 @@ const EMPTY = {
   displayNumber: '',
 }
 
-export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd, onMove }: LedgerAddingTabProps) {
+export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd, onMove, onDelete }: LedgerAddingTabProps) {
   const { customers } = useCustomers()
   const [form, setForm] = useState(EMPTY)
   // The "Account" dropdown — the customer already added to the selected season.
@@ -349,6 +350,7 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd, on
           ledgers={ledgers}
           defaultSeasonId={form.seasonId}
           onClose={() => setShowView(false)}
+          onDelete={onDelete}
         />
       )}
     </div>

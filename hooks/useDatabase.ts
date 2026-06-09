@@ -196,7 +196,16 @@ export function useLedgers() {
     [refresh],
   )
 
-  return { ledgers, loading, error, refresh, createLedger, updateLedger, closeLedger, reopenLedger, bulkCreateLedgers, moveLedger }
+  const deleteLedger = useCallback(
+    async (id: string) => {
+      const res = await ledgerApi.remove(id)
+      await refresh()
+      return res
+    },
+    [refresh],
+  )
+
+  return { ledgers, loading, error, refresh, createLedger, updateLedger, closeLedger, reopenLedger, bulkCreateLedgers, moveLedger, deleteLedger }
 }
 
 export function useSuppliers() {
