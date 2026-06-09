@@ -22,7 +22,7 @@ const TABS = [
 export default function AccountsModule({ language }: AccountsModuleProps) {
   const tabsRef = useRef<HTMLDivElement>(null)
   const { seasons, loading: seasonsLoading, createSeason } = useSeasons()
-  const { ledgers, createLedger, closeLedger, reopenLedger, bulkCreateLedgers, refresh: refreshLedgers } = useLedgers()
+  const { ledgers, createLedger, closeLedger, bulkCreateLedgers, refresh: refreshLedgers } = useLedgers()
 
   // Number-key tab shortcuts (same UX as AnalyticsModule)
   useEffect(() => {
@@ -84,10 +84,6 @@ export default function AccountsModule({ language }: AccountsModuleProps) {
             ledgers={ledgers}
             onClose={async (id, date, closingBalance) => {
               await closeLedger(id, date, closingBalance)
-              await refreshLedgers()
-            }}
-            onReopen={async (id) => {
-              await reopenLedger(id)
               await refreshLedgers()
             }}
             onDataChanged={refreshLedgers}

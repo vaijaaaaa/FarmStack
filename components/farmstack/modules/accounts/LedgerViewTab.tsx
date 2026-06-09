@@ -25,7 +25,6 @@ interface LedgerViewTabProps {
     closureDate: string,
     closingBalance: number,
   ) => Promise<void> | void
-  onReopen?: (ledgerId: string) => Promise<void> | void
   onDataChanged?: () => void
 }
 
@@ -42,7 +41,7 @@ const KIND_BADGE: Record<LineKind, { label: string; cls: string }> = {
   credit: { label: 'Credit', cls: 'bg-amber-100 text-amber-700' },
 }
 
-export default function LedgerViewTab({ seasons, ledgers, onClose, onReopen, onDataChanged }: LedgerViewTabProps) {
+export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged }: LedgerViewTabProps) {
   // Interest / closure controls are hidden until toggled with Ctrl+I.
   const [closureMode, setClosureMode] = useState(false)
   const closing = closureMode
@@ -204,7 +203,7 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onReopen, onD
           </Picker>
         )}
 
-        {ledger && (
+        {ledger && ledger.status !== 'closed' && (
           <button
             onClick={() => setShowEntry(true)}
             className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-gray-400"
@@ -271,7 +270,7 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onReopen, onD
             )}
           </div>
 
-          {/* Interest + closure panel (closure only) */}
+          {/* Interest + closure panel (closure only) — single row */}
           {closing && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
               <div className="flex flex-wrap items-end gap-5">
@@ -297,49 +296,41 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onReopen, onD
                   <Calculator className="h-4 w-4" /> Calculate
                 </button>
 
-                {/* Account status — green Open / red Closed (beside Calculate) */}
-                <span
-                  className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${
-                    ledger.status === 'closed' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                  }`}
-                >
-                  <Lock className="h-3.5 w-3.5" />
-                  {ledger.status === 'closed' ? 'Closed' : 'Open'}
-                  {ledger.status === 'closed' && ledger.closure_date ? ` · ${fmtDate(ledger.closure_date)}` : ''}
-                </span>
+                {/* Status badge + Close A/C — all on the same row */}
+                <div className="ml-auto flex items-center gap-3 pb-0.5">
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${
+                      ledger.status === 'closed' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                    }`}
+                  >
+                    <Lock className="h-3.5 w-3.5" />
+                    {ledger.status === 'closed' ? 'Closed' : 'Open'}
+                    {ledger.status === 'closed' && ledger.closure_date ? ` · ${fmtDate(ledger.closure_date)}` : ''}
+                  </span>
+                  {ledger.status !== 'closed' && (
+                    <button
+                      onClick={doClose}
+                      disabled={!closureDate || closing_}
+                      className="flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40"
+                    >
+                      <Lock className="h-4 w-4" />
+                      {closing_ ? 'Closing…' : 'Close A/C'}
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-5 border-t border-amber-200 pt-4">
-                {calculated && (
-                  <div className="text-sm text-amber-900">
-                    Closing balance{' '}
-                    <span className="font-semibold">
-                      ₹{inr(Math.abs(netCarry))} {netCarry < 0 ? 'Cr' : 'Dr'}
-                    </span>
-                    <span className="text-amber-700">
-                      {' '}— use Add Entry to carry it into the next season as O.B.
-                    </span>
-                  </div>
-                )}
-
-                {ledger.status === 'closed' ? (
-                  <button
-                    onClick={() => onReopen && onReopen(ledger.id)}
-                    className="ml-auto flex items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:border-gray-400"
-                  >
-                    Re-open
-                  </button>
-                ) : (
-                  <button
-                    onClick={doClose}
-                    disabled={!closureDate || closing_}
-                    className="ml-auto flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40"
-                  >
-                    <Lock className="h-4 w-4" />
-                    {closing_ ? 'Closing…' : 'Close A/C'}
-                  </button>
-                )}
-              </div>
+              {calculated && (
+                <p className="mt-3 text-sm text-amber-900">
+                  Closing balance{' '}
+                  <span className="font-semibold">
+                    ₹{inr(Math.abs(netCarry))} {netCarry < 0 ? 'Cr' : 'Dr'}
+                  </span>
+                  <span className="text-amber-700">
+                    {' '}— use Add Entry to carry it into the next season as O.B.
+                  </span>
+                </p>
+              )}
             </div>
           )}
 
