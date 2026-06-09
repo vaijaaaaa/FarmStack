@@ -88,6 +88,35 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd, on
     setMsg(null)
   }
 
+  // Runs the move after the user confirms via the toast action.
+  const doMove = async (
+    seasonId: string,
+    fromId: string,
+    toId: string,
+    sourceName: string,
+    targetName: string,
+  ) => {
+    setSaving(true)
+    try {
+      await onMove({
+        season_id: seasonId,
+        from_customer_id: fromId,
+        to_customer_id: toId,
+        to_customer_name: targetName,
+      })
+      setAccountCustomerId('')
+      setForm((prev) => ({ ...EMPTY, seasonId: prev.seasonId }))
+      toast.success(`Moved ${sourceName} → ${targetName}`)
+      setMsg({ kind: 'ok', text: `Moved ${sourceName}'s account to ${targetName}.` })
+    } catch (err) {
+      const text = (err as Error).message
+      setMsg({ kind: 'err', text })
+      toast.error(text)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const submit = async () => {
     setMsg(null)
     if (!form.seasonId) {
@@ -119,30 +148,14 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd, on
       const sourceName = sourceLedger.customer_name || 'this account'
       const target = customers.find((c) => c.id === form.userId)
       const targetName = target?.name ?? 'the selected user'
-      if (
-        !window.confirm(
-          `Move everything from "${sourceName}" to "${targetName}" in this season? Their sales and entries will be reassigned. This can't be undone automatically.`,
-        )
-      )
-        return
-
-      setSaving(true)
-      try {
-        await onMove({
-          season_id: form.seasonId,
-          from_customer_id: accountCustomerId,
-          to_customer_id: form.userId,
-          to_customer_name: targetName,
-        })
-        setAccountCustomerId('')
-        setForm((prev) => ({ ...EMPTY, seasonId: prev.seasonId }))
-        toast.success(`Moved ${sourceName} → ${targetName}`)
-        setMsg({ kind: 'ok', text: `Moved ${sourceName}'s account to ${targetName}.` })
-      } catch (err) {
-        setMsg({ kind: 'err', text: (err as Error).message })
-      } finally {
-        setSaving(false)
-      }
+      const seasonId = form.seasonId
+      const fromId = accountCustomerId
+      const toId = form.userId
+      toast(`Move everything from "${sourceName}" to "${targetName}"?`, {
+        description: "Their sales and entries in this season will be reassigned. This can't be undone automatically.",
+        action: { label: 'Move', onClick: () => doMove(seasonId, fromId, toId, sourceName, targetName) },
+        cancel: { label: 'Cancel', onClick: () => {} },
+      })
       return
     }
 

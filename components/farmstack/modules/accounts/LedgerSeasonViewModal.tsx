@@ -52,13 +52,7 @@ export default function LedgerSeasonViewModal({
       (s) => s.customer_id === l.customer_id && (s.season_id || '') === l.season_id,
     ) && !entries.some((e) => e.customer_id === l.customer_id && e.season_id === l.season_id)
 
-  const remove = async (l: LedgerRecord) => {
-    if (
-      !window.confirm(
-        `Remove ${l.customer_name || 'this account'} from this season? This empty account will be deleted.`,
-      )
-    )
-      return
+  const doRemove = async (l: LedgerRecord) => {
     setDeletingId(l.id)
     try {
       await onDelete(l.id)
@@ -68,6 +62,14 @@ export default function LedgerSeasonViewModal({
     } finally {
       setDeletingId('')
     }
+  }
+
+  const remove = (l: LedgerRecord) => {
+    toast(`Remove ${l.customer_name || 'this account'} from this season?`, {
+      description: 'This empty account will be deleted.',
+      action: { label: 'Remove', onClick: () => doRemove(l) },
+      cancel: { label: 'Cancel', onClick: () => {} },
+    })
   }
 
   const seasonOptions = seasons.map((s) => ({
