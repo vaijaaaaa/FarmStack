@@ -91,6 +91,26 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
 
   const { debit, credit, grand } = totalsFor(lines)
 
+  // The customer's ACTIVE account = their oldest OPEN season (by name), matching
+  // activeSeasonForCustomer on the server. Entries/sales only ever land there, so
+  // an open-but-not-active ledger can't accept new entries.
+  const activeSeasonId = useMemo(() => {
+    if (!ledger) return ''
+    const seasonName = new Map(seasons.map((s) => [s.id, s.name || '']))
+    let best: LedgerRecord | null = null
+    for (const l of ledgers) {
+      if (l.customer_id !== ledger.customer_id || l.status === 'closed') continue
+      if (!best || (seasonName.get(l.season_id) || '') < (seasonName.get(best.season_id) || ''))
+        best = l
+    }
+    return best?.season_id ?? ''
+  }, [ledger, ledgers, seasons])
+
+  const isClosed = ledger?.status === 'closed'
+  // Open ledger that isn't the active one → entries are blocked (go to the active).
+  const blockedForEntry = !!ledger && !isClosed && ledger.season_id !== activeSeasonId
+  const activeSeasonName = seasons.find((s) => s.id === activeSeasonId)?.name ?? ''
+
   // Option is a CUSTOMER-facing filter, so flip it to the stored (shop) drcr.
   const visibleLines = useMemo(() => {
     if (option === 'all') return lines
@@ -212,8 +232,18 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
 
         {ledger && (
           <button
-            onClick={() => setShowEntry(true)}
-            className="flex items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-gray-400"
+            onClick={() => !blockedForEntry && setShowEntry(true)}
+            disabled={blockedForEntry}
+            title={
+              blockedForEntry
+                ? `${ledger.customer_name}'s active account is in ${activeSeasonName} — add entries there`
+                : undefined
+            }
+            className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium ${
+              blockedForEntry
+                ? 'cursor-not-allowed border-gray-200 bg-gray-50 text-gray-300'
+                : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+            }`}
           >
             <Plus className="h-4 w-4" /> Add Entry
           </button>
@@ -254,6 +284,15 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
         </div>
       ) : (
         <>
+          {blockedForEntry && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              This isn&rsquo;t {ledger.customer_name}&rsquo;s active account. New sales &amp;
+              entries go to their active account in{' '}
+              <span className="font-semibold">{activeSeasonName}</span> until it&rsquo;s closed —
+              so Add Entry is disabled here.
+            </div>
+          )}
+
           {/* Summary — customer perspective (Dr/Cr mirrored from the shop's books) */}
           <div className="mb-4 flex flex-wrap items-end gap-4">
             <Stat label="Debit" value={`₹${inr(credit)}`} />
@@ -267,7 +306,11 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
               <>
                 <Stat label="Debit Interest" value={`₹${inr(interestSummary.credit)}`} />
                 <Stat label="Credit Interest" value={`₹${inr(interestSummary.debit)}`} />
-                <Stat label="Grand Interest" value={`₹${inr(grandInterest)}`} />
+                <Stat
+                  label="Grand Interest"
+                  value={`₹${inr(Math.abs(grandInterest))} ${grandInterest < 0 ? 'Dr' : 'Cr'}`}
+                  accent={grandInterest < 0 ? 'green' : 'default'}
+                />
                 <Stat
                   label="Closing Balance"
                   value={`₹${inr(Math.abs(netCarry))} ${netCarry < 0 ? 'Dr' : 'Cr'}`}
@@ -403,7 +446,11 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                     ₹{inr(Math.abs(grand))} {grand < 0 ? 'Dr' : 'Cr'}
                   </td>
                   {closing && <td />}
-                  {closing && <td className="px-4 py-3 text-right font-semibold text-gray-900">₹{inr(totalInterest)}</td>}
+                  {closing && (
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900">
+                      ₹{inr(Math.abs(totalInterest))} {totalInterest < 0 ? 'Dr' : 'Cr'}
+                    </td>
+                  )}
                 </tr>
               </tfoot>
             </table>
