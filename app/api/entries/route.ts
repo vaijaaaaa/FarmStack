@@ -76,26 +76,38 @@ export async function POST(request: Request) {
       )
     }
 
-    // Route every entry to the customer's ACTIVE (earliest-open) account, so all
-    // entries accumulate there until it's closed. Falls back to the picked season
-    // only if the customer has no open account yet.
+    // A customer's transactions go ONLY to their ACTIVE account — the OLDEST
+    // still-open season. A customer may have several accounts, but if their active
+    // (oldest-open) account is in a DIFFERENT season than the one picked here,
+    // adding is blocked: that account must be closed (and carried) first.
     const activeCache = new Map<string, string>()
-    for (const e of entries as { customer_id: string; season_id: string }[]) {
+    const checkedActive = new Set<string>()
+    for (const e of entries as { customer_id: string; customer_name: string; season_id: string }[]) {
+      if (checkedActive.has(e.customer_id)) continue
+      checkedActive.add(e.customer_id)
       if (!activeCache.has(e.customer_id)) {
-        activeCache.set(e.customer_id, (await activeSeasonForCustomer(e.customer_id)) || seasonId)
+        activeCache.set(e.customer_id, await activeSeasonForCustomer(e.customer_id))
       }
-      e.season_id = activeCache.get(e.customer_id) as string
+      const active = activeCache.get(e.customer_id) as string
+      if (active && active !== seasonId) {
+        const sn = await queryOne<{ name: string }>('SELECT name FROM seasons WHERE id = ?', [active])
+        return NextResponse.json(
+          {
+            error: `${e.customer_name || 'This customer'} has an active account in ${sn?.name || 'another season'}. Close & move it before adding to a new season.`,
+          },
+          { status: 409 },
+        )
+      }
     }
 
-    // Block adding to a CLOSED account (only reachable via the no-active fallback).
-    const checked = new Set<string>()
-    for (const e of entries as { customer_id: string; customer_name: string; season_id: string }[]) {
-      const key = `${e.season_id}|${e.customer_id}`
-      if (checked.has(key)) continue
-      checked.add(key)
+    // Block adding to a CLOSED account in the picked season.
+    const checkedClosed = new Set<string>()
+    for (const e of entries as { customer_id: string; customer_name: string }[]) {
+      if (checkedClosed.has(e.customer_id)) continue
+      checkedClosed.add(e.customer_id)
       const closed = await queryOne<{ id: string }>(
         "SELECT id FROM ledgers WHERE season_id = ? AND customer_id = ? AND status = 'closed'",
-        [e.season_id, e.customer_id],
+        [seasonId, e.customer_id],
       )
       if (closed) {
         return NextResponse.json(

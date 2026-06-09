@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Plus, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { EntryType } from '@/types/farmstack'
 import { useCustomers, useSeasons, useEntries } from '@/hooks/useDatabase'
 import SearchableSelect from './accounts/SearchableSelect'
@@ -154,7 +155,9 @@ export default function EntriesGrid({
       })
       onAdded?.()
     } catch (err) {
-      setMsg({ kind: 'err', text: (err as Error).message })
+      const text = (err as Error).message
+      setMsg({ kind: 'err', text })
+      toast.error(text)
     } finally {
       setSaving(false)
     }

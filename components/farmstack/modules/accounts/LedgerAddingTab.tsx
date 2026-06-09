@@ -1,22 +1,28 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { Plus, Users } from 'lucide-react'
+import { useState } from 'react'
+import { Plus, Users, ArrowLeftRight, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import { useCustomers } from '@/hooks/useDatabase'
 import type { LedgerRecord, Season } from '@/types/farmstack'
 import SearchableSelect from './SearchableSelect'
 import SeasonLedgerTable from './SeasonLedgerTable'
+import LedgerSeasonViewModal from './LedgerSeasonViewModal'
 
 interface LedgerAddingTabProps {
   seasons: Season[]
   ledgers: LedgerRecord[]
   onAdd: (payload: Partial<LedgerRecord>) => Promise<unknown>
-  onUpdate: (id: string, payload: Partial<LedgerRecord>) => Promise<unknown>
   onBulkAdd: (payload: {
     season_id: string
     customers: Partial<LedgerRecord>[]
   }) => Promise<{ created: number; skipped: number }>
+  onMove: (payload: {
+    season_id: string
+    from_customer_id: string
+    to_customer_id: string
+    to_customer_name: string
+  }) => Promise<unknown>
 }
 
 const EMPTY = {
@@ -29,7 +35,7 @@ const EMPTY = {
   displayNumber: '',
 }
 
-export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onBulkAdd }: LedgerAddingTabProps) {
+export default function LedgerAddingTab({ seasons, ledgers, onAdd, onBulkAdd, onMove }: LedgerAddingTabProps) {
   const { customers } = useCustomers()
   const [form, setForm] = useState(EMPTY)
   // The "Account" dropdown — the customer already added to the selected season.
@@ -37,6 +43,7 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [showBulk, setShowBulk] = useState(false)
+  const [showView, setShowView] = useState(false)
 
   const set = (key: keyof typeof EMPTY, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -46,17 +53,10 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
     label: s.name || s.description || '(untitled)',
   }))
 
-  // User = ALL customers (the master list to pick from).
+  // Account = ALL customers — this is the customer you add to the season (or the
+  // SOURCE when moving). User = ALL customers too, but optional: only the move target.
+  const accountOptions = customers.map((c) => ({ value: c.id, label: c.name }))
   const userOptions = customers.map((c) => ({ value: c.id, label: c.name }))
-
-  // Account = only the customers already attached to the selected season.
-  const accountOptions = useMemo(
-    () =>
-      ledgers
-        .filter((l) => l.season_id === form.seasonId)
-        .map((l) => ({ value: l.customer_id, label: l.customer_name })),
-    [ledgers, form.seasonId],
-  )
 
   const changeSeason = (v: string) => {
     setForm((prev) => ({ ...EMPTY, seasonId: v }))
@@ -64,27 +64,26 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
     setMsg(null)
   }
 
-  // Selecting an existing Account loads its details for editing (and clears User).
+  // Selecting an Account just picks the customer. Detail fields reset to blank —
+  // there's no edit; an account is created once. The User pick is left untouched
+  // (Account + User together means "move" — see submit).
   const selectAccount = (cid: string) => {
     setAccountCustomerId(cid)
     setMsg(null)
-    if (!cid) return
-    const lg = ledgers.find((l) => l.season_id === form.seasonId && l.customer_id === cid)
     setForm((prev) => ({
       ...prev,
-      userId: '',
-      description: lg?.description ?? '',
-      acres: lg ? String(lg.acres ?? 0) : '',
-      closureDate: lg?.closure_date ?? '',
-      creditLimit: lg ? String(lg.credit_limit ?? 0) : '',
-      displayNumber: lg ? String(lg.display_number ?? 0) : '',
+      description: '',
+      acres: '',
+      closureDate: '',
+      creditLimit: '',
+      displayNumber: '',
     }))
   }
 
-  // Selecting a User (new customer) clears the Account selection.
+  // Selecting a User. With no Account picked → add a new ledger; with an Account
+  // also picked → move that account's data into this user.
   const selectUser = (v: string) => {
     set('userId', v)
-    setAccountCustomerId('')
     setMsg(null)
   }
 
@@ -94,20 +93,69 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
       setMsg({ kind: 'err', text: 'Please select a season.' })
       return
     }
-    // The customer is whichever is chosen — a new User, or an existing Account.
-    const customerId = form.userId || accountCustomerId
-    if (!customerId) {
-      setMsg({ kind: 'err', text: 'Please select a user (to add) or an account (to update).' })
+
+    // MOVE — an Account (source) AND a User (target) are both selected: move that
+    // account's whole ledger (sales + entries) into the target user.
+    if (accountCustomerId && form.userId) {
+      if (accountCustomerId === form.userId) {
+        setMsg({ kind: 'err', text: 'Pick a different user to move this account into.' })
+        return
+      }
+      // The source must already be an account in this season (else nothing to move).
+      const sourceLedger = ledgers.find(
+        (l) => l.season_id === form.seasonId && l.customer_id === accountCustomerId,
+      )
+      if (!sourceLedger) {
+        const name = customers.find((c) => c.id === accountCustomerId)?.name ?? 'That account'
+        toast.error(`${name} isn't in this season yet — add them first.`)
+        return
+      }
+      if (ledgers.some((l) => l.season_id === form.seasonId && l.customer_id === form.userId)) {
+        const name = customers.find((c) => c.id === form.userId)?.name ?? 'That customer'
+        toast.error(`${name} already has an account in this season`)
+        return
+      }
+      const sourceName = sourceLedger.customer_name || 'this account'
+      const target = customers.find((c) => c.id === form.userId)
+      const targetName = target?.name ?? 'the selected user'
+      if (
+        !window.confirm(
+          `Move everything from "${sourceName}" to "${targetName}" in this season? Their sales and entries will be reassigned. This can't be undone automatically.`,
+        )
+      )
+        return
+
+      setSaving(true)
+      try {
+        await onMove({
+          season_id: form.seasonId,
+          from_customer_id: accountCustomerId,
+          to_customer_id: form.userId,
+          to_customer_name: targetName,
+        })
+        setAccountCustomerId('')
+        setForm((prev) => ({ ...EMPTY, seasonId: prev.seasonId }))
+        toast.success(`Moved ${sourceName} → ${targetName}`)
+        setMsg({ kind: 'ok', text: `Moved ${sourceName}'s account to ${targetName}.` })
+      } catch (err) {
+        setMsg({ kind: 'err', text: (err as Error).message })
+      } finally {
+        setSaving(false)
+      }
       return
     }
 
-    // A customer can only be added ONCE to a season. Adding a User who is already
-    // in this season is blocked (editing via the Account dropdown is allowed).
-    if (
-      form.userId &&
-      ledgers.some((l) => l.season_id === form.seasonId && l.customer_id === form.userId)
-    ) {
-      const name = customers.find((c) => c.id === form.userId)?.name ?? 'This customer'
+    // ADD / UPDATE — the customer is the Account. (User is only for moving.)
+    const customerId = accountCustomerId
+    if (!customerId) {
+      setMsg({ kind: 'err', text: 'Please select an account (customer).' })
+      return
+    }
+
+    // An account is created ONCE per season — no editing. Re-adding the same
+    // customer is blocked with a toast.
+    if (ledgers.some((l) => l.season_id === form.seasonId && l.customer_id === customerId)) {
+      const name = customers.find((c) => c.id === customerId)?.name ?? 'This customer'
       toast.error(`${name} is already in this season`)
       return
     }
@@ -125,18 +173,10 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
         display_number: Number(form.displayNumber) || 0,
         closure_date: form.closureDate,
       }
-      if (editing) {
-        const existing = ledgers.find(
-          (l) => l.season_id === form.seasonId && l.customer_id === customerId,
-        )
-        if (existing) await onUpdate(existing.id, payload)
-        else await onAdd(payload)
-      } else {
-        await onAdd(payload)
-      }
-      setAccountCustomerId(customerId)
+      await onAdd(payload)
+      setAccountCustomerId('')
       setForm((prev) => ({ ...EMPTY, seasonId: prev.seasonId }))
-      setMsg({ kind: 'ok', text: `${customer?.name ?? 'Customer'} saved to the season.` })
+      setMsg({ kind: 'ok', text: `${customer?.name ?? 'Customer'} added to the season.` })
     } catch (err) {
       setMsg({ kind: 'err', text: (err as Error).message })
     } finally {
@@ -144,7 +184,11 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
     }
   }
 
-  const editing = !!accountCustomerId && !form.userId
+  // Account (source) + User (target) both chosen → move mode.
+  const moving = !!accountCustomerId && !!form.userId
+  const moveSourceName =
+    customers.find((c) => c.id === accountCustomerId)?.name ?? ''
+  const moveTargetName = customers.find((c) => c.id === form.userId)?.name ?? ''
 
   return (
     <div className="flex h-full items-center justify-center pt-3">
@@ -156,12 +200,20 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
               Pick a season and a user (customer) to create their account.
             </p>
           </div>
-          <button
-            onClick={() => setShowBulk(true)}
-            className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-400"
-          >
-            <Users className="h-3.5 w-3.5" /> Add All
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowView(true)}
+              className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-400"
+            >
+              <Eye className="h-3.5 w-3.5" /> View
+            </button>
+            <button
+              onClick={() => setShowBulk(true)}
+              className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-400"
+            >
+              <Users className="h-3.5 w-3.5" /> Add All
+            </button>
+          </div>
         </div>
 
         <div className="mt-3 space-y-2.5">
@@ -174,22 +226,22 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
             />
           </Field>
 
-          {/* Account = customers already in this season · User = all customers */}
+          {/* Account = the customer (all customers) · User = optional move target */}
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Account (in this season)">
+            <Field label="Account (customer)">
               <SearchableSelect
                 options={accountOptions}
                 value={accountCustomerId}
                 onChange={selectAccount}
-                placeholder={form.seasonId ? '— Accounts —' : '— Select season —'}
+                placeholder="— Select customer —"
               />
             </Field>
-            <Field label="User (customer)">
+            <Field label="User (optional · move to)">
               <SearchableSelect
                 options={userOptions}
                 value={form.userId}
                 onChange={selectUser}
-                placeholder="— Select customer —"
+                placeholder="— Only to move —"
               />
             </Field>
           </div>
@@ -243,6 +295,17 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
             </Field>
           </div>
 
+          {moving && (
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                Move <b>{moveSourceName || 'this account'}</b>&rsquo;s sales &amp; entries
+                {' → '}
+                <b>{moveTargetName || 'the selected user'}</b> in this season.
+              </span>
+            </div>
+          )}
+
           {msg && (
             <p className={`text-xs ${msg.kind === 'ok' ? 'text-green-600' : 'text-red-500'}`}>
               {msg.text}
@@ -252,9 +315,19 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
           <button
             onClick={submit}
             disabled={saving}
-            className="mt-1 flex w-full items-center justify-center gap-2 rounded-md bg-black py-2.5 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-50"
+            className={`mt-1 flex w-full items-center justify-center gap-2 rounded-md py-2.5 text-sm font-medium text-white disabled:opacity-50 ${
+              moving ? 'bg-amber-600 hover:bg-amber-700' : 'bg-black hover:bg-gray-900'
+            }`}
           >
-            <Plus className="h-4 w-4" /> {saving ? 'Saving…' : editing ? 'Update' : 'Add'}
+            {moving ? (
+              <>
+                <ArrowLeftRight className="h-4 w-4" /> {saving ? 'Moving…' : 'Move Account'}
+              </>
+            ) : (
+              <>
+                <Plus className="h-4 w-4" /> {saving ? 'Saving…' : 'Add'}
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -267,6 +340,15 @@ export default function LedgerAddingTab({ seasons, ledgers, onAdd, onUpdate, onB
           defaultSeasonId={form.seasonId}
           onClose={() => setShowBulk(false)}
           onBulkAdd={onBulkAdd}
+        />
+      )}
+
+      {showView && (
+        <LedgerSeasonViewModal
+          seasons={seasons}
+          ledgers={ledgers}
+          defaultSeasonId={form.seasonId}
+          onClose={() => setShowView(false)}
         />
       )}
     </div>

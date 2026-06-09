@@ -111,6 +111,16 @@ export const ledgerApi = {
       method: 'PATCH',
       body: JSON.stringify({ id, action: 'reopen' }),
     }),
+  move: (payload: {
+    season_id: string
+    from_customer_id: string
+    to_customer_id: string
+    to_customer_name: string
+  }) =>
+    request<{ moved: boolean; season_id: string; from_customer_id: string; to_customer_id: string }>(
+      '/api/ledgers',
+      { method: 'PATCH', body: JSON.stringify({ action: 'move', ...payload }) },
+    ),
 }
 
 export const supplierApi = {

@@ -182,7 +182,21 @@ export function useLedgers() {
     [refresh],
   )
 
-  return { ledgers, loading, error, refresh, createLedger, updateLedger, closeLedger, reopenLedger, bulkCreateLedgers }
+  const moveLedger = useCallback(
+    async (payload: {
+      season_id: string
+      from_customer_id: string
+      to_customer_id: string
+      to_customer_name: string
+    }) => {
+      const res = await ledgerApi.move(payload)
+      await refresh()
+      return res
+    },
+    [refresh],
+  )
+
+  return { ledgers, loading, error, refresh, createLedger, updateLedger, closeLedger, reopenLedger, bulkCreateLedgers, moveLedger }
 }
 
 export function useSuppliers() {

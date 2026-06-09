@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { query, queryOne, execute, newId, nowIso } from '@/lib/db'
+import { query, queryOne, execute, transaction, newId, nowIso } from '@/lib/db'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,15 +65,8 @@ export async function POST(request: Request) {
           skipped++
           continue
         }
-        // One active account per customer — skip if they already have an open one.
-        const otherOpen = await queryOne<{ id: string }>(
-          "SELECT id FROM ledgers WHERE customer_id = ? AND status = 'open' LIMIT 1",
-          [cid],
-        )
-        if (otherOpen) {
-          skipped++
-          continue
-        }
+        // A customer may be attached to several seasons. Only the OLDEST still-open
+        // account is "active" (receives transactions) — enforced at entry/sale time.
         await execute(
           `INSERT INTO ledgers
             (id, season_id, customer_id, customer_name, user_name, description, acres, credit_limit, display_number, closure_date, opening_balance, closing_balance, carried, status, created_at)
@@ -134,21 +127,9 @@ export async function POST(request: Request) {
       return NextResponse.json(updated, { status: 200 })
     }
 
-    // One ACTIVE (open) account per customer at a time — the current one must be
-    // closed before a new season's account can be opened.
-    const otherOpen = await queryOne<{ name: string }>(
-      `SELECT s.name FROM ledgers l JOIN seasons s ON s.id = l.season_id
-       WHERE l.customer_id = ? AND l.status = 'open' LIMIT 1`,
-      [customerId],
-    )
-    if (otherOpen) {
-      return NextResponse.json(
-        {
-          error: `${customerName || 'This customer'} already has an active account in ${otherOpen.name}. Please close it first.`,
-        },
-        { status: 409 },
-      )
-    }
+    // A customer may be attached to several seasons (multiple accounts). Only the
+    // OLDEST still-open account is "active" and receives transactions — that rule
+    // is enforced when entries/sales are posted, not here.
 
     // New ledgers always open at ₹0 — carry-forward is manual.
     const ledger = {
@@ -233,10 +214,85 @@ export async function PUT(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json()
+    // Move an entire account from one customer to another within a season.
+    // Re-points the ledger row plus all of that season's sales & entries from the
+    // source customer to the target. Body:
+    //   { action: 'move', season_id, from_customer_id, to_customer_id, to_customer_name }
+    if (String(body.action ?? '') === 'move') {
+      const seasonId = String(body.season_id ?? '').trim()
+      const fromId = String(body.from_customer_id ?? '').trim()
+      const toId = String(body.to_customer_id ?? '').trim()
+      const toName = String(body.to_customer_name ?? '').trim()
+
+      if (!seasonId || !fromId || !toId) {
+        return NextResponse.json(
+          { error: 'Season, source account and target user are all required.' },
+          { status: 400 },
+        )
+      }
+      if (fromId === toId) {
+        return NextResponse.json(
+          { error: 'Source and target must be different customers.' },
+          { status: 400 },
+        )
+      }
+
+      // The source must actually be an account in this season.
+      const source = await queryOne<{ id: string; customer_name: string; status: string }>(
+        'SELECT id, customer_name, status FROM ledgers WHERE season_id = ? AND customer_id = ?',
+        [seasonId, fromId],
+      )
+      if (!source) {
+        return NextResponse.json(
+          { error: 'The source account does not exist in this season.' },
+          { status: 404 },
+        )
+      }
+
+      // The target must NOT already have an account in this season (no merging).
+      const targetInSeason = await queryOne<{ id: string }>(
+        'SELECT id FROM ledgers WHERE season_id = ? AND customer_id = ?',
+        [seasonId, toId],
+      )
+      if (targetInSeason) {
+        return NextResponse.json(
+          {
+            error: `${toName || 'The target customer'} already has an account in this season. Pick someone who isn't in this season.`,
+          },
+          { status: 409 },
+        )
+      }
+
+      await transaction((run) => {
+        run('UPDATE ledgers SET customer_id = ?, customer_name = ? WHERE id = ?', [
+          toId,
+          toName,
+          source.id,
+        ])
+        run(
+          'UPDATE entries SET customer_id = ?, customer_name = ? WHERE season_id = ? AND customer_id = ?',
+          [toId, toName, seasonId, fromId],
+        )
+        run(
+          'UPDATE sales_invoices SET customer_id = ?, customer_name = ? WHERE season_id = ? AND customer_id = ?',
+          [toId, toName, seasonId, fromId],
+        )
+      })
+
+      return NextResponse.json({
+        moved: true,
+        season_id: seasonId,
+        from_customer_id: fromId,
+        to_customer_id: toId,
+      })
+    }
+
+    // Close / reopen both act on a ledger id.
     const id = String(body.id ?? '').trim()
     if (!id) {
       return NextResponse.json({ error: 'Ledger id is required' }, { status: 400 })
     }
+
     // Re-open a previously closed ledger.
     if (String(body.action ?? '') === 'reopen') {
       await execute('UPDATE ledgers SET status = ?, closure_date = ? WHERE id = ?', [
