@@ -49,49 +49,55 @@ const DEFAULT_WT = 74 // PattiDefaultWt — per-bag weight used when Weight is l
 
 // Legacy "Patti" net-payable formula, decoded from the old app's Export logic and
 // verified cell-for-cell against the exported Excel. Lives here only.
-// The Weight entered is the NET weight (exactly the value shown in the patti/Excel
-// Weight column) — it is used as-is; no tare is subtracted here. It is read two ways:
-//   • Weight > 75     → total net weight: gross = floor(weight × price / 75 + 0.1)
-//   • 0 < Weight ≤ 75 → per-bag average weight: gross = floor(bags × price × weight / 75 + 0.1)
+// The Weight entered is the GROSS scale weight (exactly like the old software).
+// It is read three ways, and the per-bag tare (Wt.Adj/Bag) is deducted on gross totals:
+//   • Weight > 75     → GROSS total: net = weight − ceil(wtAdj × bags);
+//                       value = floor(net × price / 75 + 0.1)
+//   • 0 < Weight ≤ 75 → per-bag average weight (no tare):
+//                       value = floor(bags × price × weight / 75 + 0.1)
 //   • Weight = 0      → fall back to DEFAULT_WT (74) as the per-bag weight.
-// Then: labour = ceil(bags × labour/bag); less = round(gross × less%/100);
-//       net = gross − labour − less.
+// Then: labour (Hamali) = ceil(bags × labour/bag); less = round(value × less%/100);
+//       net = value − labour − less.
+//
+// netWeight is the weight as the old Excel prints it (gross minus tare for totals;
+// the per-bag value as-is for the ≤75 case; DEFAULT_WT for blank).
+function valueFor(bags: number, weight: number, price: number, wtAdj: number): { gross: number; netWeight: number } {
+  if (weight > BASE_WT) {
+    const netWeight = weight - Math.ceil(wtAdj * bags)
+    return { gross: Math.floor((netWeight * price) / BASE_WT + 0.1), netWeight }
+  }
+  if (weight > 0) {
+    return { gross: Math.floor((bags * price * weight) / BASE_WT + 0.1), netWeight: weight }
+  }
+  return { gross: Math.floor((bags * price * DEFAULT_WT) / BASE_WT + 0.1), netWeight: DEFAULT_WT }
+}
+
 function computeNet(row: CropRow, cfg: Config): number {
   const bags = Number(row.bags) || 0
   const weight = Number(row.weight) || 0
   const price = Number(row.price) || 0
   if (bags <= 0 || price <= 0) return 0
-
-  let gross: number
-  if (weight > BASE_WT) {
-    // Total net weight (as entered) → value per base-bag.
-    gross = Math.floor((weight * price) / BASE_WT + 0.1)
-  } else if (weight > 0) {
-    // Per-bag average weight.
-    gross = Math.floor((bags * price * weight) / BASE_WT + 0.1)
-  } else {
-    // Weight blank → default per-bag weight.
-    gross = Math.floor((bags * price * DEFAULT_WT) / BASE_WT + 0.1)
-  }
-
+  const { gross } = valueFor(bags, weight, price, cfg.wtAdjPerBag)
   const labour = Math.ceil(bags * cfg.labourPerBag)
   const less = Math.round((gross * cfg.lessPercent) / 100)
   return gross - labour - less
 }
 
-// Same math as computeNet but for a stored CropPurchase, returning each part so
-// the printed invoice / history can show the value, less and hamali breakdown.
-function breakdownFor(cp: CropPurchase): { gross: number; less: number; labour: number; net: number } {
+// Same math as computeNet but for a stored CropPurchase, returning each part (and
+// the net weight) so the printed invoice / history can show the full breakdown.
+function breakdownFor(cp: CropPurchase): {
+  gross: number
+  less: number
+  labour: number
+  net: number
+  netWeight: number
+} {
   const bags = Number(cp.bags) || 0
-  const weight = Number(cp.weight) || 0
   const price = Number(cp.price) || 0
-  let gross: number
-  if (weight > BASE_WT) gross = Math.floor((weight * price) / BASE_WT + 0.1)
-  else if (weight > 0) gross = Math.floor((bags * price * weight) / BASE_WT + 0.1)
-  else gross = Math.floor((bags * price * DEFAULT_WT) / BASE_WT + 0.1)
+  const { gross, netWeight } = valueFor(bags, Number(cp.weight) || 0, price, Number(cp.wt_adj_per_bag) || 0)
   const labour = Math.ceil(bags * (Number(cp.labour_per_bag) || 0))
   const less = Math.round((gross * (Number(cp.less_percent) || 0)) / 100)
-  return { gross, less, labour, net: gross - labour - less }
+  return { gross, less, labour, net: gross - labour - less, netWeight }
 }
 
 export default function CropPurchaseModule({ language: _language }: CropPurchaseModuleProps) {
@@ -270,7 +276,7 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
       <hr>
       <table>
         <tr><td class="lbl">Bags</td><td class="r">${inr(Number(cp.bags) || 0)}</td></tr>
-        <tr><td class="lbl">Weight</td><td class="r">${inr(Number(cp.weight) || 0)}</td></tr>
+        <tr><td class="lbl">Weight</td><td class="r">${inr(b.netWeight)}</td></tr>
         <tr><td class="lbl">Rate</td><td class="r">${rs(Number(cp.price) || 0)}</td></tr>
       </table>
       <hr>
@@ -425,7 +431,7 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
               <th className="w-24 border-r border-gray-400 px-3 py-2.5 text-right font-medium text-gray-500">Bags</th>
               <th
                 className="w-28 border-r border-gray-400 px-3 py-2.5 text-right font-medium text-gray-500"
-                title="Net weight (the value shown on the patti). A value of 75 or less is read as the per-bag average weight."
+                title="Gross scale weight — the app deducts the per-bag tare (Wt.Adj/Bag × bags). A value of 75 or less is read as the per-bag average weight."
               >
                 Weight
               </th>
@@ -608,7 +614,7 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
                           {seasons.find((s) => s.id === cp.season_id)?.name || ''}
                         </td>
                         <td className="px-4 py-2.5 text-right text-gray-700">{inr(cp.bags || 0)}</td>
-                        <td className="px-4 py-2.5 text-right text-gray-700">{inr(cp.weight || 0)}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-700">{inr(breakdownFor(cp).netWeight)}</td>
                         <td className="px-4 py-2.5 text-right text-gray-700">₹{inr(cp.price || 0)}</td>
                         <td className="px-4 py-2.5 text-right font-semibold text-gray-900">₹{inr(cp.net_amount || 0)}</td>
                         <td className="px-4 py-2.5 text-gray-500">{cp.vehicle_number || '—'}</td>
