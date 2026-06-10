@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season, Entry, LedgerRecord } from '@/types/farmstack'
+import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season, Entry, LedgerRecord, CropPurchase } from '@/types/farmstack'
 import {
   customerApi,
   supplierApi,
@@ -12,8 +12,10 @@ import {
   seasonApi,
   entriesApi,
   ledgerApi,
+  cropPurchaseApi,
   type PurchaseHistoryRow,
   type CreateEntriesPayload,
+  type CreateCropPurchasesPayload,
 } from '@/src/services/api'
 
 function useCollection<T, C, R = void>(
@@ -114,6 +116,39 @@ export function useEntries() {
   )
 
   return { entries, loading, error, refresh, createEntries }
+}
+
+export function useCropPurchases() {
+  const [cropPurchases, setCropPurchases] = useState<CropPurchase[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      setCropPurchases(await cropPurchaseApi.list())
+      setError(null)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  const createCropPurchases = useCallback(
+    async (payload: CreateCropPurchasesPayload) => {
+      const res = await cropPurchaseApi.create(payload)
+      await refresh()
+      return res
+    },
+    [refresh],
+  )
+
+  return { cropPurchases, loading, error, refresh, createCropPurchases }
 }
 
 export function useLedgers() {

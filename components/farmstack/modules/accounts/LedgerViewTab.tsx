@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Lock, LockOpen, Zap, X, Calculator, BookOpen } from 'lucide-react'
-import { useSalesInvoices, useEntries, useProducts } from '@/hooks/useDatabase'
+import { useSalesInvoices, useEntries, useProducts, useCropPurchases } from '@/hooks/useDatabase'
 import type { LedgerRecord, Season, SalesInvoice } from '@/types/farmstack'
 import EntriesGrid from '../EntriesGrid'
 import {
@@ -41,6 +41,7 @@ const KIND_BADGE: Record<LineKind, { label: string; cls: string }> = {
   sale: { label: 'Sales', cls: 'bg-green-100 text-green-700' },
   cash: { label: 'Cash', cls: 'bg-sky-100 text-sky-700' },
   credit: { label: 'Credit', cls: 'bg-amber-100 text-amber-700' },
+  crop: { label: 'Crop', cls: 'bg-lime-100 text-lime-700' },
 }
 
 export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged }: LedgerViewTabProps) {
@@ -62,6 +63,7 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
   const { invoices } = useSalesInvoices()
   const { entries, refresh: refreshEntries } = useEntries()
   const { products } = useProducts()
+  const { cropPurchases } = useCropPurchases()
 
   const [seasonId, setSeasonId] = useState('')
   const [ledgerId, setLedgerId] = useState('')
@@ -100,8 +102,8 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
   }, [ledgers, seasons])
 
   const lines = useMemo(
-    () => (ledger ? buildLedgerLines(ledger, invoices, entries) : []),
-    [ledger, invoices, entries],
+    () => (ledger ? buildLedgerLines(ledger, invoices, entries, cropPurchases) : []),
+    [ledger, invoices, entries, cropPurchases],
   )
 
   const { debit, credit, grand } = totalsFor(lines)

@@ -2,11 +2,11 @@
 // Ledger records live in the DB (LedgerRecord); the ledger *lines* shown on the
 // Display/Closure screens are composed on the fly from sales (debits) + entries
 // (cash = credit / credit = debit) + the carried opening balance.
-import type { LedgerRecord, SalesInvoice, Entry } from '@/types/farmstack'
+import type { LedgerRecord, SalesInvoice, Entry, CropPurchase } from '@/types/farmstack'
 
 export type { Season, LedgerRecord } from '@/types/farmstack'
 
-export type LineKind = 'ob' | 'sale' | 'cash' | 'credit'
+export type LineKind = 'ob' | 'sale' | 'cash' | 'credit' | 'crop'
 export type DrCr = 'debit' | 'credit'
 
 export interface LedgerLine {
@@ -49,6 +49,7 @@ export function buildLedgerLines(
   ledger: LedgerRecord,
   sales: SalesInvoice[],
   entries: Entry[],
+  cropPurchases: CropPurchase[] = [],
 ): LedgerLine[] {
   const lines: LedgerLine[] = []
 
@@ -90,6 +91,22 @@ export function buildLedgerLines(
         ? e.comments || 'Opening Balance'
         : `${isCash ? 'Cash' : 'Credit'} entry${e.comments ? ` · ${e.comments}` : ''}`,
       amount: Number(e.amount) || 0,
+    })
+  }
+
+  // Crop purchases ("Patti") for THIS customer in THIS season → the shop bought
+  // crop from them and owes money → a CREDIT (reduces their outstanding), same
+  // direction as a cash payment. Walk-ins have a null customer_id → never match.
+  for (const cp of cropPurchases) {
+    if (cp.customer_id !== ledger.customer_id) continue
+    if ((cp.season_id || '') !== ledger.season_id) continue
+    lines.push({
+      id: `crop-${cp.id}`,
+      date: cp.date || cp.created_at || '',
+      kind: 'crop',
+      drcr: 'credit',
+      description: `Crop purchase · ${cp.bags || 0} bags`,
+      amount: Number(cp.net_amount) || 0,
     })
   }
 

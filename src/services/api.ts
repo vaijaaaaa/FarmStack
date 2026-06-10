@@ -1,5 +1,5 @@
 // Thin client for the API routes.
-import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season, Entry, LedgerRecord } from '@/types/farmstack'
+import type { Customer, Supplier, Product, ProductType, SalesInvoice, Season, Entry, LedgerRecord, CropPurchase } from '@/types/farmstack'
 
 // The Tally server URL the user configured (their localhost, or a tunnel URL).
 // Stored in the browser and sent on every request so the server posts to the
@@ -80,6 +80,41 @@ export const entriesApi = {
   },
   create: (payload: CreateEntriesPayload) =>
     request<{ created: Entry[] }>('/api/entries', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+}
+
+export interface CropPurchaseRowPayload {
+  customer_id: string | null
+  customer_name: string
+  is_walkin: number
+  bags: number
+  weight: number
+  price: number
+  vehicle_number: string
+  net_amount: number
+  date: string
+}
+
+export interface CreateCropPurchasesPayload {
+  season_id: string
+  labour_per_bag: number
+  wt_adj_per_bag: number
+  less_percent: number
+  rows: CropPurchaseRowPayload[]
+}
+
+export const cropPurchaseApi = {
+  list: (params?: { season_id?: string; customer_id?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.season_id) qs.set('season_id', params.season_id)
+    if (params?.customer_id) qs.set('customer_id', params.customer_id)
+    const q = qs.toString()
+    return request<CropPurchase[]>(`/api/crop-purchases${q ? `?${q}` : ''}`)
+  },
+  create: (payload: CreateCropPurchasesPayload) =>
+    request<{ created: CropPurchase[] }>('/api/crop-purchases', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

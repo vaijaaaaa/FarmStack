@@ -49,6 +49,27 @@ export interface LedgerRecord {
   created_at?: string
 }
 
+// A crop ("Patti") purchase: the shop buys crop from a farmer. For DB customers
+// the net value posts to their season ledger as a credit; walk-ins (customer_id
+// null, is_walkin 1) are recorded only.
+export interface CropPurchase {
+  id: string
+  season_id: string
+  customer_id: string | null
+  customer_name: string
+  is_walkin: number // 1 = walk-in
+  bags: number
+  weight: number
+  price: number // per-quintal rate
+  vehicle_number: string
+  labour_per_bag: number
+  wt_adj_per_bag: number
+  less_percent: number
+  net_amount: number
+  date: string // YYYY-MM-DD
+  created_at?: string
+}
+
 export interface TallyMasterFields {
   tally_sync_status?: string
   tally_response?: string | null

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Search, X } from 'lucide-react'
+import { ChevronDown, Search, X, Plus } from 'lucide-react'
 
 export interface SelectOption {
   value: string
@@ -16,6 +16,12 @@ interface SearchableSelectProps {
   placeholder?: string
   /** Optional: render extra content (e.g. a badge) after the label in each list item. */
   renderOption?: (option: SelectOption) => React.ReactNode
+  /** Optional: allow creating a new value from free text — shows an "Add '<x>'" row. */
+  allowCreate?: boolean
+  /** Called with the typed text when the user picks the "Add '<x>'" row. */
+  onCreate?: (label: string) => void
+  /** Optional: extra classes appended to the trigger button (size/border overrides). */
+  triggerClassName?: string
 }
 
 interface PanelPos {
@@ -33,6 +39,9 @@ export default function SearchableSelect({
   onChange,
   placeholder = '— Select —',
   renderOption,
+  allowCreate,
+  onCreate,
+  triggerClassName = '',
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -109,13 +118,25 @@ export default function SearchableSelect({
     setSearch('')
   }
 
+  const create = (label: string) => {
+    onCreate?.(label)
+    setOpen(false)
+    setSearch('')
+  }
+
+  // Show the "Add '<x>'" row when free-text creation is enabled, there's typed
+  // text, and it doesn't exactly match an existing option (case-insensitive).
+  const trimmed = search.trim()
+  const exactMatch = options.some((o) => o.label.toLowerCase() === trimmed.toLowerCase())
+  const showCreate = !!allowCreate && !!onCreate && trimmed !== '' && !exactMatch
+
   return (
     <>
       <button
         ref={triggerRef}
         type="button"
         onClick={toggle}
-        className="flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+        className={`flex w-full items-center justify-between rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-black ${triggerClassName}`}
       >
         <span className={`truncate ${selected ? 'text-gray-900' : 'text-gray-400'}`}>
           {selected ? selected.label : placeholder}
@@ -154,7 +175,7 @@ export default function SearchableSelect({
             </div>
 
             <ul className="max-h-56 overflow-y-auto py-1">
-              {filtered.length === 0 ? (
+              {filtered.length === 0 && !showCreate ? (
                 <li className="px-3 py-2 text-xs text-gray-400">No results</li>
               ) : (
                 filtered.map((o) => (
@@ -173,6 +194,18 @@ export default function SearchableSelect({
                     </button>
                   </li>
                 ))
+              )}
+              {showCreate && (
+                <li className="border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => create(trimmed)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-blue-600 hover:bg-blue-50"
+                  >
+                    <Plus className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">Add &ldquo;{trimmed}&rdquo;</span>
+                  </button>
+                </li>
               )}
             </ul>
           </div>,

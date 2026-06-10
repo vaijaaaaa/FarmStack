@@ -183,6 +183,29 @@ CREATE TABLE IF NOT EXISTS entries (
   created_at TEXT NOT NULL
 );
 
+-- Crop purchases ("Patti"): the shop buys crop (paddy/etc.) from farmers. Each
+-- row records bags/weight/price/vehicle for one delivery. For farmers in the
+-- customers table the net value posts into their season ledger as a CREDIT
+-- (payment in kind — the shop owes them). Walk-ins (customer_id NULL,
+-- is_walkin = 1) are recorded here only — no account, no ledger.
+CREATE TABLE IF NOT EXISTS crop_purchases (
+  id TEXT PRIMARY KEY,
+  season_id TEXT REFERENCES seasons(id),
+  customer_id TEXT REFERENCES customers(id),   -- NULL for walk-ins
+  customer_name TEXT DEFAULT '',               -- DB name OR free-typed walk-in name
+  is_walkin INTEGER DEFAULT 0,                  -- 1 = walk-in (no ledger, no account)
+  bags REAL DEFAULT 0,
+  weight REAL DEFAULT 0,
+  price REAL DEFAULT 0,                         -- per-quintal rate
+  vehicle_number TEXT DEFAULT '',
+  labour_per_bag REAL DEFAULT 0,               -- header config snapshot per row
+  wt_adj_per_bag REAL DEFAULT 0,
+  less_percent REAL DEFAULT 0,
+  net_amount REAL DEFAULT 0,                    -- computed payable
+  date TEXT DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
 -- Ledgers: a customer attached to a season (the "Ledger Adding" record). One
 -- row per (season, customer). Sales (debits) + entries (cash=credit/credit=debit)
 -- for that customer flow into this ledger; opening_balance carries from a prior
@@ -214,6 +237,28 @@ CREATE INDEX IF NOT EXISTS idx_entries_season ON entries(season_id);
 CREATE INDEX IF NOT EXISTS idx_entries_customer ON entries(customer_id);
 CREATE INDEX IF NOT EXISTS idx_ledgers_season ON ledgers(season_id);
 CREATE INDEX IF NOT EXISTS idx_ledgers_customer ON ledgers(customer_id);
+CREATE INDEX IF NOT EXISTS idx_crop_purchases_season ON crop_purchases(season_id);
+CREATE INDEX IF NOT EXISTS idx_crop_purchases_customer ON crop_purchases(customer_id);
 
 -- ── Migrations for existing databases (run once in Supabase SQL Editor) ──────
 -- ALTER TABLE entries ADD COLUMN IF NOT EXISTS is_ob INTEGER DEFAULT 0;
+--
+-- CREATE TABLE IF NOT EXISTS crop_purchases (
+--   id TEXT PRIMARY KEY,
+--   season_id TEXT REFERENCES seasons(id),
+--   customer_id TEXT REFERENCES customers(id),
+--   customer_name TEXT DEFAULT '',
+--   is_walkin INTEGER DEFAULT 0,
+--   bags REAL DEFAULT 0,
+--   weight REAL DEFAULT 0,
+--   price REAL DEFAULT 0,
+--   vehicle_number TEXT DEFAULT '',
+--   labour_per_bag REAL DEFAULT 0,
+--   wt_adj_per_bag REAL DEFAULT 0,
+--   less_percent REAL DEFAULT 0,
+--   net_amount REAL DEFAULT 0,
+--   date TEXT DEFAULT '',
+--   created_at TEXT NOT NULL
+-- );
+-- CREATE INDEX IF NOT EXISTS idx_crop_purchases_season ON crop_purchases(season_id);
+-- CREATE INDEX IF NOT EXISTS idx_crop_purchases_customer ON crop_purchases(customer_id);
