@@ -1,13 +1,14 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Plus, X, Download, Trash2 } from 'lucide-react'
+import { Plus, X, Download, Trash2, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 import * as XLSX from 'xlsx'
-import { Language } from '@/types/farmstack'
+import { Language, CropPurchase } from '@/types/farmstack'
 import { useCustomers, useSeasons, useCropPurchases, useLedgers } from '@/hooks/useDatabase'
 import SearchableSelect from './accounts/SearchableSelect'
-import { inr } from './accounts/data'
+import { inr, fmtDate } from './accounts/data'
+import { printHtml } from '@/lib/printHtml'
 
 interface CropPurchaseModuleProps {
   language: Language
@@ -77,6 +78,21 @@ function computeNet(row: CropRow, cfg: Config): number {
   const labour = Math.ceil(bags * cfg.labourPerBag)
   const less = Math.round((gross * cfg.lessPercent) / 100)
   return gross - labour - less
+}
+
+// Same math as computeNet but for a stored CropPurchase, returning each part so
+// the printed invoice / history can show the value, less and hamali breakdown.
+function breakdownFor(cp: CropPurchase): { gross: number; less: number; labour: number; net: number } {
+  const bags = Number(cp.bags) || 0
+  const weight = Number(cp.weight) || 0
+  const price = Number(cp.price) || 0
+  let gross: number
+  if (weight > BASE_WT) gross = Math.floor((weight * price) / BASE_WT + 0.1)
+  else if (weight > 0) gross = Math.floor((bags * price * weight) / BASE_WT + 0.1)
+  else gross = Math.floor((bags * price * DEFAULT_WT) / BASE_WT + 0.1)
+  const labour = Math.ceil(bags * (Number(cp.labour_per_bag) || 0))
+  const less = Math.round((gross * (Number(cp.less_percent) || 0)) / 100)
+  return { gross, less, labour, net: gross - labour - less }
 }
 
 export default function CropPurchaseModule({ language: _language }: CropPurchaseModuleProps) {
@@ -247,6 +263,61 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
   const clearAll = () => {
     setRows([blankRow('dropdown'), blankRow('typed')])
     setMsg(null)
+  }
+
+  // ── Recent crop purchases (history) ─────────────────────────────────────────
+  const recentPurchases = useMemo(() => {
+    const list = seasonId ? cropPurchases.filter((cp) => cp.season_id === seasonId) : cropPurchases
+    return [...list]
+      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+      .slice(0, 30)
+  }, [cropPurchases, seasonId])
+
+  // ── Print a half-A5 (A6) crop-purchase invoice (the "Patti") ────────────────
+  const printCropInvoice = (cp: CropPurchase) => {
+    const b = breakdownFor(cp)
+    const seasonName = seasons.find((s) => s.id === cp.season_id)?.name || ''
+    const rs = (n: number) => `₹${inr(n)}`
+    printHtml(`<!doctype html><html><head><title>Patti — ${cp.customer_name || ''}</title>
+      <style>
+        @page { size: 105mm 148mm; margin: 6mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Arial, Helvetica, sans-serif; color:#111; margin:0; font-size:12px; }
+        .title { text-align:center; font-size:13px; font-weight:bold; letter-spacing:.5px; margin-bottom:6px; }
+        .hdr { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+        .name { font-size:15px; font-weight:bold; }
+        .veh { text-align:right; font-size:12px; }
+        .date { font-size:12px; color:#333; margin-top:2px; }
+        hr { border:none; border-top:1px solid #999; margin:6px 0; }
+        table { width:100%; border-collapse:collapse; }
+        td { padding:2px 0; font-size:12px; }
+        td.r { text-align:right; }
+        .lbl { color:#444; }
+        .grand td { font-size:14px; font-weight:bold; border-top:1px solid #000; padding-top:4px; }
+        .ded td { color:#a00; }
+      </style></head><body>
+      <div class="title">CROP PURCHASE${seasonName ? ' · ' + seasonName : ''}</div>
+      <div class="hdr">
+        <div>
+          <div class="name">${cp.customer_name || '—'}</div>
+          <div class="date">Date: ${fmtDate(cp.date || cp.created_at || '')}</div>
+        </div>
+        <div class="veh">Vehicle No.<br><b>${cp.vehicle_number || '—'}</b></div>
+      </div>
+      <hr>
+      <table>
+        <tr><td class="lbl">Bags</td><td class="r">${inr(Number(cp.bags) || 0)}</td></tr>
+        <tr><td class="lbl">Weight</td><td class="r">${inr(Number(cp.weight) || 0)}</td></tr>
+        <tr><td class="lbl">Rate</td><td class="r">${rs(Number(cp.price) || 0)}</td></tr>
+      </table>
+      <hr>
+      <table>
+        <tr><td class="lbl">Value</td><td class="r">${rs(b.gross)}</td></tr>
+        <tr class="ded"><td class="lbl">Less (${inr(Number(cp.less_percent) || 0)}%)</td><td class="r">- ${inr(b.less)}</td></tr>
+        <tr class="ded"><td class="lbl">Hamali</td><td class="r">- ${inr(b.labour)}</td></tr>
+        <tr class="grand"><td>Grand Total</td><td class="r">${rs(b.net)}</td></tr>
+      </table>
+      </body></html>`)
   }
 
   // ── Save flow ───────────────────────────────────────────────────────────────
@@ -517,6 +588,67 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
         </p>
         {msg && (
           <p className={`text-xs ${msg.kind === 'ok' ? 'text-green-600' : 'text-red-500'}`}>{msg.text}</p>
+        )}
+      </div>
+
+      {/* ── Recent crop purchases (history) ─────────────────────────────── */}
+      <div className="rounded-xl border border-gray-300 bg-white">
+        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+          <h2 className="text-sm font-semibold text-gray-800">
+            Recent Crop Purchases
+            {seasonId && (
+              <span className="ml-2 font-normal text-gray-400">
+                · {seasons.find((s) => s.id === seasonId)?.name}
+              </span>
+            )}
+          </h2>
+          <span className="text-xs text-gray-400">{recentPurchases.length} shown</span>
+        </div>
+        {recentPurchases.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-gray-400">
+            No crop purchases yet{seasonId ? ' for this season' : ''}.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs text-gray-500">
+                  <th className="px-3 py-2 font-medium">Date</th>
+                  <th className="px-3 py-2 font-medium">Customer</th>
+                  <th className="px-3 py-2 text-right font-medium">Bags</th>
+                  <th className="px-3 py-2 text-right font-medium">Weight</th>
+                  <th className="px-3 py-2 text-right font-medium">Price</th>
+                  <th className="px-3 py-2 text-right font-medium">Net</th>
+                  <th className="px-3 py-2 font-medium">Vehicle</th>
+                  <th className="px-3 py-2 text-center font-medium">Print</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentPurchases.map((cp) => (
+                  <tr key={cp.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50/50">
+                    <td className="px-3 py-2 text-gray-600">{fmtDate(cp.date || cp.created_at || '')}</td>
+                    <td className="px-3 py-2 font-medium text-gray-800">
+                      {cp.customer_name || '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-700">{inr(cp.bags || 0)}</td>
+                    <td className="px-3 py-2 text-right text-gray-700">{inr(cp.weight || 0)}</td>
+                    <td className="px-3 py-2 text-right text-gray-700">₹{inr(cp.price || 0)}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-gray-900">₹{inr(cp.net_amount || 0)}</td>
+                    <td className="px-3 py-2 text-gray-500">{cp.vehicle_number || '—'}</td>
+                    <td className="px-3 py-2 text-center">
+                      <button
+                        onClick={() => printCropInvoice(cp)}
+                        title="Print invoice"
+                        className="inline-flex items-center justify-center rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                      >
+                        <Printer className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
