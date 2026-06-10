@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS entries (
   amount REAL DEFAULT 0,
   comments TEXT DEFAULT '',
   location TEXT DEFAULT '',
+  is_ob INTEGER DEFAULT 0,   -- 1 = Opening Balance carry-forward entry (explicit flag, not comment-sniffed)
   created_at TEXT NOT NULL
 );
 
@@ -213,3 +214,6 @@ CREATE INDEX IF NOT EXISTS idx_entries_season ON entries(season_id);
 CREATE INDEX IF NOT EXISTS idx_entries_customer ON entries(customer_id);
 CREATE INDEX IF NOT EXISTS idx_ledgers_season ON ledgers(season_id);
 CREATE INDEX IF NOT EXISTS idx_ledgers_customer ON ledgers(customer_id);
+
+-- ── Migrations for existing databases (run once in Supabase SQL Editor) ──────
+-- ALTER TABLE entries ADD COLUMN IF NOT EXISTS is_ob INTEGER DEFAULT 0;

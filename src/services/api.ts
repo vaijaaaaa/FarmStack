@@ -60,6 +60,7 @@ export interface EntryRowPayload {
   date: string
   amount: number
   comments: string
+  is_ob?: number // 1 = Opening Balance carry-forward
 }
 
 export interface CreateEntriesPayload {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { query, queryOne, execute, transaction, newId, nowIso } from '@/lib/db'
-import { claimOrphanTransactions } from '@/lib/accounts'
+import { claimOrphanTransactions, activeSeasonForCustomer } from '@/lib/accounts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -340,16 +340,51 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Ledger id is required' }, { status: 400 })
     }
 
-    const ledger = await queryOne<{ season_id: string; customer_id: string }>(
-      'SELECT season_id, customer_id FROM ledgers WHERE id = ?',
+    const ledger = await queryOne<{ season_id: string; customer_id: string; customer_name: string }>(
+      'SELECT season_id, customer_id, customer_name FROM ledgers WHERE id = ?',
       [id],
     )
     if (!ledger) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
 
+    // Guard: refuse to delete an account that has entries.
+    const hasEntries = await queryOne<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM entries WHERE season_id = ? AND customer_id = ?',
+      [ledger.season_id, ledger.customer_id],
+    )
+    if ((hasEntries?.n ?? 0) > 0) {
+      return NextResponse.json(
+        { error: `${ledger.customer_name || 'This account'} has cash/credit entries — close it instead of deleting.` },
+        { status: 409 },
+      )
+    }
+
+    // Guard: refuse to delete an account that has sales invoices.
+    const hasSales = await queryOne<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM sales_invoices WHERE season_id = ? AND customer_id = ?',
+      [ledger.season_id, ledger.customer_id],
+    )
+    if ((hasSales?.n ?? 0) > 0) {
+      return NextResponse.json(
+        { error: `${ledger.customer_name || 'This account'} has sales invoices — close it instead of deleting.` },
+        { status: 409 },
+      )
+    }
+
+    // Guard: refuse to delete the customer's active (oldest-open) account.
+    const activeSeason = await activeSeasonForCustomer(ledger.customer_id)
+    if (activeSeason === ledger.season_id) {
+      return NextResponse.json(
+        { error: `${ledger.customer_name || 'This account'} is the active account and cannot be deleted.` },
+        { status: 409 },
+      )
+    }
+
     await transaction((run) => {
       run('DELETE FROM ledgers WHERE id = ?', [id])
+      // entries and sales are already confirmed empty above — these are no-ops but
+      // kept for safety so any race-condition remnant is also cleaned up.
       run('DELETE FROM entries WHERE season_id = ? AND customer_id = ?', [
         ledger.season_id,
         ledger.customer_id,

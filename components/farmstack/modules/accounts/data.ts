@@ -73,18 +73,19 @@ export function buildLedgerLines(
   }
 
   // Entries: cash = he paid = credit; credit = given on credit = debit.
-  // O.B-marked entries get the grey badge + top pin.
+  // O.B entries (is_ob = 1) get the grey badge + top pin; their direction follows
+  // the entry type: cash O.B = customer overpaid (credit), credit O.B = customer
+  // owes (debit). This lets carry-forwards represent either direction correctly.
   for (const e of entries) {
     if (e.customer_id !== ledger.customer_id || e.season_id !== ledger.season_id) continue
     const isCash = e.type === 'cash'
-    const isOB = /\bo\.?\s*b\b|opening|outstanding/i.test(e.comments || '')
+    const isOB = e.is_ob === 1
     lines.push({
       id: `entry-${e.id}`,
       date: e.date || '',
       kind: isOB ? 'ob' : isCash ? 'cash' : 'credit',
-      // An O.B is an outstanding amount the customer owes → always the owed side
-      // (shop debit → shown as Credit in the customer view), whatever type it was.
-      drcr: isOB ? 'debit' : isCash ? 'credit' : 'debit',
+      // Direction follows entry type for both regular and O.B entries.
+      drcr: isCash ? 'credit' : 'debit',
       description: isOB
         ? e.comments || 'Opening Balance'
         : `${isCash ? 'Cash' : 'Credit'} entry${e.comments ? ` · ${e.comments}` : ''}`,

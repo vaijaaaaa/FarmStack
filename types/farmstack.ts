@@ -24,6 +24,7 @@ export interface Entry {
   amount: number
   comments: string
   location: string
+  is_ob?: number // 1 = Opening Balance carry-forward; determines kind:'ob' in ledger lines
   created_at?: string
 }
 

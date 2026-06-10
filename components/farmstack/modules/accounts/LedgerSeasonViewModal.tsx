@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { X, Eye, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { LedgerRecord, Season } from '@/types/farmstack'
@@ -23,9 +23,17 @@ export default function LedgerSeasonViewModal({
   onClose,
   onDelete,
 }: LedgerSeasonViewModalProps) {
-  const { invoices } = useSalesInvoices()
-  const { entries } = useEntries()
+  const { invoices, refresh: refreshInvoices } = useSalesInvoices()
+  const { entries, refresh: refreshEntries } = useEntries()
   const [seasonId, setSeasonId] = useState(defaultSeasonId)
+
+  // Fetch fresh data when the modal opens so isEmpty() isn't based on stale
+  // data from when the parent component last polled. The server-side guard in
+  // DELETE is the hard safety net; this keeps the UI in sync with it.
+  useEffect(() => {
+    refreshInvoices()
+    refreshEntries()
+  }, [refreshInvoices, refreshEntries])
   const [deletingId, setDeletingId] = useState('')
 
   // The ACTIVE account for each customer = their OLDEST still-open season by
