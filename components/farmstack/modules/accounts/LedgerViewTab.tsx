@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Lock, X, Calculator, BookOpen } from 'lucide-react'
+import { Plus, Lock, LockOpen, Zap, X, Calculator, BookOpen } from 'lucide-react'
 import { useSalesInvoices, useEntries, useProducts } from '@/hooks/useDatabase'
 import type { LedgerRecord, Season, SalesInvoice } from '@/types/farmstack'
 import EntriesGrid from '../EntriesGrid'
@@ -310,6 +310,27 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
           </button>
         )}
 
+        {/* Status badge — always visible once an account is selected so users
+            immediately see Closed/Active/Open without opening Interest mode. */}
+        {ledger && (() => {
+          const isActive = !isClosed && activeLedgerIds.has(ledger.id)
+          const Icon = isClosed ? Lock : isActive ? Zap : LockOpen
+          const cls = isClosed
+            ? 'bg-red-100 text-red-600'
+            : isActive
+              ? 'bg-orange-100 text-orange-600'
+              : 'bg-green-100 text-green-700'
+          const label = isClosed
+            ? `Closed${ledger.closure_date ? ` · ${fmtDate(ledger.closure_date)}` : ''}`
+            : isActive ? 'Active' : 'Open'
+          return (
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium ${cls}`}>
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </span>
+          )
+        })()}
+
         {ledger && closing && (
           <Picker label="Closure Date">
             <input
@@ -368,11 +389,13 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
             )}
           </div>
 
-          {/* Interest + closure panel (closure only) — single row */}
+          {/* Interest + closure panel */}
           {closing && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
-              <div className="flex flex-wrap items-end gap-5">
-                <span className="pb-2 text-sm font-semibold text-amber-800">Accrual Interest</span>
+              {/* items-center so the Calculate button aligns with the middle of the
+                  rate-field inputs, not the bottom of their sub-note labels. */}
+              <div className="flex flex-wrap items-center gap-5">
+                <span className="text-sm font-semibold text-amber-800">Accrual Interest</span>
                 {/* Customer view: Debit % = his payments, Credit % = what he owes */}
                 <RateField
                   label="Debit % / month"
@@ -395,18 +418,9 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                   <Calculator className="h-4 w-4" /> Calculate
                 </button>
 
-                {/* Status badge + Close A/C — all on the same row */}
-                <div className="ml-auto flex items-center gap-3 pb-0.5">
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${
-                      ledger.status === 'closed' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                    }`}
-                  >
-                    <Lock className="h-3.5 w-3.5" />
-                    {ledger.status === 'closed' ? 'Closed' : 'Open'}
-                    {ledger.status === 'closed' && ledger.closure_date ? ` · ${fmtDate(ledger.closure_date)}` : ''}
-                  </span>
-                  {ledger.status !== 'closed' && (
+                {/* Close A/C — status badge is already always visible in the pickers row */}
+                {ledger.status !== 'closed' && (
+                  <div className="ml-auto">
                     <button
                       onClick={doClose}
                       disabled={!closureDate || closing_}
@@ -415,8 +429,8 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                       <Lock className="h-4 w-4" />
                       {closing_ ? 'Closing…' : 'Close A/C'}
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
               {calculated && (
