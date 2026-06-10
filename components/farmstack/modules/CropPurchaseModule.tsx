@@ -1,9 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Plus, X, Download, Trash2, Printer } from 'lucide-react'
+import { Plus, X, Trash2, Printer, Eye } from 'lucide-react'
 import { toast } from 'sonner'
-import * as XLSX from 'xlsx'
 import { Language, CropPurchase } from '@/types/farmstack'
 import { useCustomers, useSeasons, useCropPurchases, useLedgers } from '@/hooks/useDatabase'
 import SearchableSelect from './accounts/SearchableSelect'
@@ -107,6 +106,8 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
   const [lessPercent, setLessPercent] = useState('2')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
+  const [printPrompt, setPrintPrompt] = useState<CropPurchase[] | null>(null)
   const [confirm, setConfirm] = useState<{
     ledger: { name: string; net: number }[]
     walkin: { name: string; net: number }[]
@@ -222,44 +223,6 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
   const totalBags = rows.reduce((s, r) => s + (Number(r.bags) || 0), 0)
   const totalWeight = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0)
 
-  // ── Export ──────────────────────────────────────────────────────────────────
-  const exportXlsx = () => {
-    const data = seasonId
-      ? cropPurchases.filter((cp) => cp.season_id === seasonId)
-      : cropPurchases
-    if (data.length === 0) {
-      toast.error('No crop purchases to export')
-      return
-    }
-    const headers = ['Date', 'Customer', 'Walk-in?', 'Bags', 'Weight', 'Price', 'Net', 'Vehicle']
-    const aoa: (string | number)[][] = [headers]
-    for (const cp of data) {
-      aoa.push([
-        cp.date || '',
-        cp.customer_name || '',
-        cp.is_walkin ? 'Yes' : 'No',
-        cp.bags || 0,
-        cp.weight || 0,
-        cp.price || 0,
-        cp.net_amount || 0,
-        cp.vehicle_number || '',
-      ])
-    }
-    const ws = XLSX.utils.aoa_to_sheet(aoa)
-    for (let c = 0; c < headers.length; c++) {
-      const ref = XLSX.utils.encode_cell({ r: 0, c })
-      if (ws[ref]) ws[ref].s = { font: { bold: true } }
-    }
-    ws['!cols'] = headers.map((h, c) => {
-      const maxLen = aoa.reduce((m, row) => Math.max(m, String(row[c] ?? '').length), h.length)
-      return { wch: Math.min(40, maxLen + 2) }
-    })
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Patti')
-    XLSX.writeFile(wb, `crop_purchases_${today()}.xlsx`)
-    toast.success('Crop purchases exported')
-  }
-
   const clearAll = () => {
     setRows([blankRow('dropdown'), blankRow('typed')])
     setMsg(null)
@@ -330,8 +293,10 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
       setMsg({ kind: 'err', text: 'Add at least one row with a seller and a positive value.' })
       return
     }
-    if (valid.some((r) => !(r.seasonId || seasonId))) {
-      setMsg({ kind: 'err', text: 'Please select a season.' })
+    // Only DB-customer rows post to a season ledger, so only they need a season.
+    // Walk-in (random) purchases are recorded without any season.
+    if (valid.some((r) => r.customer_id) && !seasonId) {
+      setMsg({ kind: 'err', text: 'Please select a season for the selected customers.' })
       return
     }
     setConfirm({
@@ -350,41 +315,36 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
       (r) => (r.customer_id || (r.is_walkin && r.customer_name)) && computeNet(r, cfg) > 0,
     )
 
-    // Group by each row's own season (rows may span seasons if the header season
-    // changed between picks) → one batch per season.
-    const bySeason = new Map<string, CropRow[]>()
-    for (const r of valid) {
-      const sid = r.seasonId || seasonId
-      if (!bySeason.has(sid)) bySeason.set(sid, [])
-      bySeason.get(sid)!.push(r)
-    }
-
     setSaving(true)
     try {
-      for (const [sid, seasonRows] of bySeason) {
-        await createCropPurchases({
-          season_id: sid,
-          labour_per_bag: cfg.labourPerBag,
-          wt_adj_per_bag: cfg.wtAdjPerBag,
-          less_percent: cfg.lessPercent,
-          rows: seasonRows.map((r) => ({
-            customer_id: r.customer_id,
-            customer_name: r.customer_name,
-            is_walkin: r.is_walkin ? 1 : 0,
-            bags: Number(r.bags) || 0,
-            weight: Number(r.weight) || 0,
-            price: Number(r.price) || 0,
-            vehicle_number: r.vehicle_number.trim(),
-            net_amount: computeNet(r, cfg),
-            date: r.date,
-          })),
-        })
-      }
+      // One atomic request — each row carries its own season (walk-ins: none), so
+      // the whole save commits or fails together. No partial commit → no duplicate
+      // on retry, even when rows span multiple seasons.
+      const res = await createCropPurchases({
+        labour_per_bag: cfg.labourPerBag,
+        wt_adj_per_bag: cfg.wtAdjPerBag,
+        less_percent: cfg.lessPercent,
+        rows: valid.map((r) => ({
+          season_id: r.is_walkin ? null : r.seasonId || seasonId || null,
+          customer_id: r.customer_id,
+          customer_name: r.customer_name,
+          is_walkin: r.is_walkin ? 1 : 0,
+          bags: Number(r.bags) || 0,
+          weight: Number(r.weight) || 0,
+          price: Number(r.price) || 0,
+          vehicle_number: r.vehicle_number.trim(),
+          net_amount: computeNet(r, cfg),
+          date: r.date,
+        })),
+      })
+      const created = res?.created ?? []
       setRows([blankRow('dropdown'), blankRow('typed')])
       setMsg({
         kind: 'ok',
         text: `${valid.length} crop ${valid.length === 1 ? 'purchase' : 'purchases'} saved.`,
       })
+      // Offer to print invoices for what was just saved.
+      if (created.length) setPrintPrompt(created)
     } catch (err) {
       const text = (err as Error).message
       setMsg({ kind: 'err', text })
@@ -437,16 +397,20 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
             <Plus className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Save'}
           </button>
           <button
-            onClick={exportXlsx}
-            className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-gray-400"
-          >
-            <Download className="h-3.5 w-3.5" /> Export
-          </button>
-          <button
             onClick={clearAll}
             className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-red-300 hover:text-red-600"
           >
             <Trash2 className="h-3.5 w-3.5" /> Clear
+          </button>
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium ${
+              showHistory
+                ? 'border-gray-400 bg-gray-100 text-gray-800'
+                : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" /> View
           </button>
         </div>
       </div>
@@ -591,66 +555,91 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
         )}
       </div>
 
-      {/* ── Recent crop purchases (history) ─────────────────────────────── */}
-      <div className="rounded-xl border border-gray-300 bg-white">
-        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
-          <h2 className="text-sm font-semibold text-gray-800">
-            Recent Crop Purchases
-            {seasonId && (
-              <span className="ml-2 font-normal text-gray-400">
-                · {seasons.find((s) => s.id === seasonId)?.name}
-              </span>
-            )}
-          </h2>
-          <span className="text-xs text-gray-400">{recentPurchases.length} shown</span>
-        </div>
-        {recentPurchases.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-gray-400">
-            No crop purchases yet{seasonId ? ' for this season' : ''}.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs text-gray-500">
-                  <th className="px-3 py-2 font-medium">Date</th>
-                  <th className="px-3 py-2 font-medium">Customer</th>
-                  <th className="px-3 py-2 text-right font-medium">Bags</th>
-                  <th className="px-3 py-2 text-right font-medium">Weight</th>
-                  <th className="px-3 py-2 text-right font-medium">Price</th>
-                  <th className="px-3 py-2 text-right font-medium">Net</th>
-                  <th className="px-3 py-2 font-medium">Vehicle</th>
-                  <th className="px-3 py-2 text-center font-medium">Print</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentPurchases.map((cp) => (
-                  <tr key={cp.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50/50">
-                    <td className="px-3 py-2 text-gray-600">{fmtDate(cp.date || cp.created_at || '')}</td>
-                    <td className="px-3 py-2 font-medium text-gray-800">
-                      {cp.customer_name || '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right text-gray-700">{inr(cp.bags || 0)}</td>
-                    <td className="px-3 py-2 text-right text-gray-700">{inr(cp.weight || 0)}</td>
-                    <td className="px-3 py-2 text-right text-gray-700">₹{inr(cp.price || 0)}</td>
-                    <td className="px-3 py-2 text-right font-semibold text-gray-900">₹{inr(cp.net_amount || 0)}</td>
-                    <td className="px-3 py-2 text-gray-500">{cp.vehicle_number || '—'}</td>
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        onClick={() => printCropInvoice(cp)}
-                        title="Print invoice"
-                        className="inline-flex items-center justify-center rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                      >
-                        <Printer className="h-4 w-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* ── Recent crop purchases (history) — big modal opened by View ────── */}
+      {showHistory && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black/40 p-6">
+          <div className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white">
+            {/* Sticky header */}
+            <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <Eye className="h-4 w-4 text-gray-500" />
+                <h3 className="text-sm font-semibold text-gray-800">
+                  Recent Crop Purchases
+                  {seasonId && (
+                    <span className="ml-2 font-normal text-gray-400">
+                      · {seasons.find((s) => s.id === seasonId)?.name}
+                    </span>
+                  )}
+                </h3>
+                <span className="ml-1 text-xs text-gray-400">({recentPurchases.length})</span>
+              </div>
+              <button onClick={() => setShowHistory(false)} className="text-gray-400 hover:text-gray-700">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Scrollable table body */}
+            <div className="min-h-0 flex-1 overflow-auto">
+              {recentPurchases.length === 0 ? (
+                <p className="p-12 text-center text-sm text-gray-400">
+                  No crop purchases yet{seasonId ? ' for this season' : ''}.
+                </p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 z-10 bg-gray-50">
+                    <tr className="border-b border-gray-200 text-left text-xs text-gray-500">
+                      <th className="px-4 py-2.5 font-medium">Date</th>
+                      <th className="px-4 py-2.5 font-medium">Customer</th>
+                      <th className="px-4 py-2.5 font-medium">Season</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Bags</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Weight</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Price</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Net</th>
+                      <th className="px-4 py-2.5 font-medium">Vehicle</th>
+                      <th className="px-4 py-2.5 text-center font-medium">Print</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentPurchases.map((cp) => (
+                      <tr key={cp.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50">
+                        <td className="px-4 py-2.5 text-gray-600">{fmtDate(cp.date || cp.created_at || '')}</td>
+                        <td className="px-4 py-2.5 font-medium text-gray-800">{cp.customer_name || '—'}</td>
+                        <td className="px-4 py-2.5 text-gray-600">
+                          {seasons.find((s) => s.id === cp.season_id)?.name || ''}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-gray-700">{inr(cp.bags || 0)}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-700">{inr(cp.weight || 0)}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-700">₹{inr(cp.price || 0)}</td>
+                        <td className="px-4 py-2.5 text-right font-semibold text-gray-900">₹{inr(cp.net_amount || 0)}</td>
+                        <td className="px-4 py-2.5 text-gray-500">{cp.vehicle_number || '—'}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <button
+                            onClick={() => printCropInvoice(cp)}
+                            title="Print invoice"
+                            className="inline-flex items-center justify-center rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                          >
+                            <Printer className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Sticky footer */}
+            <div className="flex shrink-0 items-center justify-end border-t border-gray-100 px-5 py-4">
+              <button
+                onClick={() => setShowHistory(false)}
+                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-600 hover:border-gray-400"
+              >
+                Close
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ── Confirmation modal ──────────────────────────────────────────── */}
       {confirm && (
@@ -707,6 +696,54 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
               >
                 Confirm &amp; Save
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Print prompt (after a save) ─────────────────────────────────── */}
+      {printPrompt && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-gray-200 bg-white">
+            <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+              <h3 className="text-sm font-semibold text-gray-800">
+                Saved — print {printPrompt.length === 1 ? 'invoice' : 'invoices'}?
+              </h3>
+              <button onClick={() => setPrintPrompt(null)} className="text-gray-400 hover:text-gray-700">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="max-h-80 divide-y divide-gray-100 overflow-auto px-5 py-2 text-sm">
+              {printPrompt.map((cp) => (
+                <div key={cp.id} className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="font-medium text-gray-800">{cp.customer_name || '—'}</span>
+                    <span className="ml-2 text-gray-500">₹{inr(cp.net_amount || 0)}</span>
+                  </div>
+                  <button
+                    onClick={() => printCropInvoice(cp)}
+                    className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-400"
+                  >
+                    <Printer className="h-3.5 w-3.5" /> Print
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-5 py-3">
+              <button
+                onClick={() => setPrintPrompt(null)}
+                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-600 hover:border-gray-400"
+              >
+                Close
+              </button>
+              {printPrompt.length > 1 && (
+                <button
+                  onClick={() => printPrompt.forEach((cp) => printCropInvoice(cp))}
+                  className="flex items-center gap-1.5 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900"
+                >
+                  <Printer className="h-3.5 w-3.5" /> Print all
+                </button>
+              )}
             </div>
           </div>
         </div>

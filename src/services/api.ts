@@ -86,6 +86,7 @@ export const entriesApi = {
 }
 
 export interface CropPurchaseRowPayload {
+  season_id: string | null // per-row season (null for walk-ins / no season)
   customer_id: string | null
   customer_name: string
   is_walkin: number
@@ -98,7 +99,6 @@ export interface CropPurchaseRowPayload {
 }
 
 export interface CreateCropPurchasesPayload {
-  season_id: string
   labour_per_bag: number
   wt_adj_per_bag: number
   less_percent: number

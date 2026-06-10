@@ -40,20 +40,17 @@ export async function GET(request: Request) {
 }
 
 // POST /api/crop-purchases
-// Batch insert. Body:
-//   { season_id, labour_per_bag, wt_adj_per_bag, less_percent,
-//     rows: [{ customer_id, customer_name, is_walkin, bags, weight, price, vehicle_number, net_amount, date }] }
-// DB-customer rows (customer_id set, is_walkin 0) post to the customer's active
-// season ledger as a credit and are gated exactly like /api/entries. Walk-in rows
-// (customer_id null, is_walkin 1) are recorded only — they bypass all ledger logic.
+// Batch insert in ONE transaction (atomic — no partial commits). Body:
+//   { labour_per_bag, wt_adj_per_bag, less_percent,
+//     rows: [{ season_id, customer_id, customer_name, is_walkin, bags, weight, price, vehicle_number, net_amount, date }] }
+// Each row carries its OWN season, so a single save can span seasons and still be
+// all-or-nothing. DB-customer rows (customer_id set, is_walkin 0) post to that
+// season's ledger as a credit and are gated like /api/entries. Walk-in rows
+// (customer_id null, is_walkin 1) are recorded only — they bypass all ledger logic
+// and never carry a season.
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-
-    const seasonId = String(body.season_id ?? '').trim()
-    if (!seasonId) {
-      return NextResponse.json({ error: 'Please select a season' }, { status: 400 })
-    }
 
     const labourPerBag = Number(body.labour_per_bag) || 0
     const wtAdjPerBag = Number(body.wt_adj_per_bag) || 0
@@ -65,9 +62,12 @@ export async function POST(request: Request) {
       .map((r: Record<string, unknown>) => {
         const isWalkin = r.is_walkin ? 1 : 0
         const cid = String(r.customer_id ?? '').trim()
+        const rSeason = String(r.season_id ?? '').trim()
         return {
           id: newId(),
-          season_id: seasonId,
+          // Walk-ins never belong to a season (no ledger/account). DB rows use the
+          // row's own season. Empty → NULL (FK to seasons; '' would violate it).
+          season_id: isWalkin ? null : rSeason || null,
           // Walk-ins carry no customer FK.
           customer_id: isWalkin ? null : cid || null,
           customer_name: String(r.customer_name ?? '').trim(),
@@ -102,24 +102,31 @@ export async function POST(request: Request) {
       customer_id: string | null
       customer_name: string
       is_walkin: number
-      season_id: string
+      season_id: string | null
     }
     const ledgerRows = (purchases as CropRow[]).filter((p) => p.customer_id && !p.is_walkin)
 
+    // Every DB-customer row must carry a season (its crop posts to that ledger).
+    for (const p of ledgerRows) {
+      if (!p.season_id) {
+        return NextResponse.json(
+          { error: `Please select a season for ${p.customer_name || 'the selected customer'}` },
+          { status: 400 },
+        )
+      }
+    }
+
     // ── Ledger gating (DB customers only) — mirrors /api/entries ──────────────
-    // A customer's crop value goes ONLY to their ACTIVE (oldest-open) account. If
-    // their active account is in a different season than the one picked, block it.
+    // A customer's crop value goes ONLY to their ACTIVE (oldest-open) account, so
+    // each DB row's season must equal that customer's active season.
     const activeCache = new Map<string, string>()
-    const checkedActive = new Set<string>()
     for (const p of ledgerRows) {
       const cid = p.customer_id as string
-      if (checkedActive.has(cid)) continue
-      checkedActive.add(cid)
       if (!activeCache.has(cid)) {
         activeCache.set(cid, await activeSeasonForCustomer(cid))
       }
       const active = activeCache.get(cid) as string
-      if (active && active !== seasonId) {
+      if (active && active !== p.season_id) {
         const sn = await queryOne<{ name: string }>('SELECT name FROM seasons WHERE id = ?', [active])
         return NextResponse.json(
           {
@@ -130,15 +137,15 @@ export async function POST(request: Request) {
       }
     }
 
-    // Block posting to a CLOSED account in the picked season.
+    // Block posting to a CLOSED account in the row's season.
     const checkedClosed = new Set<string>()
     for (const p of ledgerRows) {
-      const cid = p.customer_id as string
-      if (checkedClosed.has(cid)) continue
-      checkedClosed.add(cid)
+      const key = `${p.season_id}|${p.customer_id}`
+      if (checkedClosed.has(key)) continue
+      checkedClosed.add(key)
       const closed = await queryOne<{ id: string }>(
         "SELECT id FROM ledgers WHERE season_id = ? AND customer_id = ? AND status = 'closed'",
-        [seasonId, cid],
+        [p.season_id, p.customer_id],
       )
       if (closed) {
         return NextResponse.json(
@@ -148,7 +155,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Insert ALL rows (DB customers + walk-ins) in one transaction.
+    // Insert ALL rows (every season, DB customers + walk-ins) in ONE transaction —
+    // all-or-nothing, so a failure never leaves a partially-saved batch behind.
     await transaction((run) => {
       for (const p of purchases) {
         run(
@@ -176,14 +184,14 @@ export async function POST(request: Request) {
       }
     })
 
-    // Ensure each DB customer has a ledger in the picked season so the crop line
-    // shows up in the Accounts ledger. Walk-ins get no ledger.
+    // Ensure each (season, DB customer) has a ledger so the crop line shows up in
+    // the Accounts ledger. Walk-ins get no ledger.
     const seen = new Set<string>()
     for (const p of ledgerRows) {
-      const cid = p.customer_id as string
-      if (seen.has(cid)) continue
-      seen.add(cid)
-      await ensureLedgerExists(seasonId, cid, p.customer_name)
+      const key = `${p.season_id}|${p.customer_id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      await ensureLedgerExists(p.season_id as string, p.customer_id as string, p.customer_name)
     }
 
     return NextResponse.json({ created: purchases }, { status: 201 })
