@@ -534,6 +534,7 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-5">
               <EntriesGrid
+                showOb
                 lockedCustomer={{ id: ledger.customer_id, name: ledger.customer_name }}
                 // Open account → season locked to it (entries accumulate here).
                 // Closed account → pick a future season to carry the O.B into.
