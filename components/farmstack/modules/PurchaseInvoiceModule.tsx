@@ -958,11 +958,14 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     }
   }
 
-  // Header Total Amount = sum of (quantity × buying price) across all rows.
-  const purchaseTotal = purchaseItems.reduce(
-    (sum, it) => sum + Number(it.quantity || '0') * Number(it.buyingPrice || '0'),
-    0,
-  )
+  // Header Total Amount = sum of (qty × buying price × (1 + gst/100)) —
+  // same formula used when saving each line, so preview matches the saved total.
+  const purchaseTotal = purchaseItems.reduce((sum, it) => {
+    const qty = Number(it.quantity || '0')
+    const price = Number(it.buyingPrice || '0')
+    const taxRate = Number(it.gstRate || '0')
+    return sum + qty * price * (1 + taxRate / 100)
+  }, 0)
 
   return (
     <div className="space-y-6">
@@ -1106,7 +1109,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
 
                 {/* Total Amount — auto-calculated, read-only */}
                 <div className="flex flex-col gap-1">
-                  <label className="text-gray-700 font-medium text-xs">Total Amount</label>
+                  <label className="text-gray-700 font-medium text-xs">Total Amount (Incl. GST)</label>
                   <input
                     type="text"
                     readOnly
@@ -2238,7 +2241,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Supplier Name</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Invoice #</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Date</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Total</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Total (Incl. GST)</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-gray-700">Actions</th>
               </tr>
