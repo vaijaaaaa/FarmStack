@@ -14,6 +14,8 @@ interface SearchableSelectProps {
   value: string
   onChange: (value: string) => void
   placeholder?: string
+  /** Optional: render extra content (e.g. a badge) after the label in each list item. */
+  renderOption?: (option: SelectOption) => React.ReactNode
 }
 
 interface PanelPos {
@@ -30,6 +32,7 @@ export default function SearchableSelect({
   value,
   onChange,
   placeholder = '— Select —',
+  renderOption,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -159,11 +162,14 @@ export default function SearchableSelect({
                     <button
                       type="button"
                       onClick={() => select(o.value)}
-                      className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 ${
+                      className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-gray-50 ${
                         o.value === value ? 'bg-gray-50 font-medium text-gray-900' : 'text-gray-700'
                       }`}
                     >
-                      {o.label}
+                      <span className="truncate">{o.label}</span>
+                      {renderOption && (
+                        <span className="ml-2 shrink-0">{renderOption(o)}</span>
+                      )}
                     </button>
                   </li>
                 ))

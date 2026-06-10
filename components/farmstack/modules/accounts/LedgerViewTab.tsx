@@ -17,6 +17,7 @@ import {
   type LineKind,
   type DrCr,
 } from './data'
+import SearchableSelect from './SearchableSelect'
 
 interface LedgerViewTabProps {
   seasons: Season[]
@@ -83,6 +84,20 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
     [ledgers, seasonId],
   )
   const ledger = ledgers.find((l) => l.id === ledgerId && l.season_id === seasonId) ?? null
+
+  // Active ledger id per customer = their OLDEST open season by name — same rule
+  // as activeSeasonForCustomer on the server and LedgerSeasonViewModal client-side.
+  const activeLedgerIds = useMemo(() => {
+    const seasonName = new Map(seasons.map((s) => [s.id, s.name || '']))
+    const oldestOpen = new Map<string, LedgerRecord>()
+    for (const l of ledgers) {
+      if (l.status === 'closed') continue
+      const cur = oldestOpen.get(l.customer_id)
+      if (!cur || (seasonName.get(l.season_id) || '') < (seasonName.get(cur.season_id) || ''))
+        oldestOpen.set(l.customer_id, l)
+    }
+    return new Set([...oldestOpen.values()].map((l) => l.id))
+  }, [ledgers, seasons])
 
   const lines = useMemo(
     () => (ledger ? buildLedgerLines(ledger, invoices, entries) : []),
@@ -185,48 +200,81 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
     resetCalc()
   }
 
+  // When an account is selected, pre-fill the closure-date picker with the date
+  // that was set at account-creation time (if any). Falls back to today so the
+  // field is never blank. Only applies while the account is still open — closed
+  // accounts already have their authoritative closure date in the DB.
+  const selectLedger = (id: string) => {
+    setLedgerId(id)
+    resetCalc()
+    const picked = ledgers.find((l) => l.id === id)
+    if (picked && picked.status !== 'closed' && picked.closure_date) {
+      setClosureDate(picked.closure_date)
+    }
+  }
+
   return (
     <div className="mt-4">
       {/* ── Pickers ───────────────────────────────────────────────────── */}
       <div className="mb-5 flex flex-wrap items-end gap-4">
         <Picker label="Season">
-          <select
-            value={seasonId}
-            onChange={(e) => selectSeason(e.target.value)}
-            className="w-52 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
-          >
-            <option value="">— Select season —</option>
-            {seasons.map((s) => (
-              <option key={s.id} value={s.id}>{s.name || s.description || '(untitled)'}</option>
-            ))}
-          </select>
+          <div className="w-52">
+            <SearchableSelect
+              options={seasons.map((s) => ({
+                value: s.id,
+                label: s.name || s.description || '(untitled)',
+              }))}
+              value={seasonId}
+              onChange={selectSeason}
+              placeholder="— Select season —"
+            />
+          </div>
         </Picker>
 
         <Picker label="Account">
-          <select
-            value={ledgerId}
-            onChange={(e) => { setLedgerId(e.target.value); resetCalc() }}
-            disabled={!seasonId}
-            className="w-52 rounded-md border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-black"
-          >
-            <option value="">— Select account —</option>
-            {seasonLedgers.map((l) => (
-              <option key={l.id} value={l.id}>{l.customer_name}</option>
-            ))}
-          </select>
+          <div className="w-52">
+            <SearchableSelect
+              options={seasonLedgers.map((l) => ({ value: l.id, label: l.customer_name || '—' }))}
+              value={ledgerId}
+              onChange={selectLedger}
+              placeholder="— Select account —"
+              renderOption={(o) => {
+                const l = seasonLedgers.find((x) => x.id === o.value)
+                if (!l) return null
+                const closed = l.status === 'closed'
+                const active = !closed && activeLedgerIds.has(l.id)
+                return (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                      closed
+                        ? 'bg-red-100 text-red-600'
+                        : active
+                          ? 'bg-orange-100 text-orange-600'
+                          : 'bg-green-100 text-green-700'
+                    }`}
+                  >
+                    {closed ? 'Closed' : active ? 'Active' : 'Open'}
+                  </span>
+                )
+              }}
+            />
+          </div>
         </Picker>
 
         {ledger && (
           <Picker label="Option">
-            <select
-              value={option}
-              onChange={(e) => setOption(e.target.value as OptionFilter)}
-              className="w-32 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
-            >
-              <option value="all">All</option>
-              <option value="debit">Debit</option>
-              <option value="credit">Credit</option>
-            </select>
+            <div className="w-32">
+              <SearchableSelect
+                options={[
+                  { value: 'all', label: 'All' },
+                  { value: 'debit', label: 'Debit' },
+                  { value: 'credit', label: 'Credit' },
+                ]}
+                value={option}
+                onChange={(v) => setOption(v as OptionFilter)}
+                placeholder="All"
+              />
+            </div>
           </Picker>
         )}
 
