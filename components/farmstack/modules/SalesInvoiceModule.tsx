@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronUp, Download, Filter, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import TallyStatusCell from '../components/TallyStatusCell'
+import SearchSelectInline from '../components/SearchSelectInline'
+import ProductSearchModal from '../components/ProductSearchModal'
 import SalesBulkUploadModal, { type ParsedSalesRow } from './sales/BulkUploadModal'
 import { printHtml } from '@/lib/printHtml'
 
@@ -150,6 +152,11 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     })
     setSaleLines(newLines.length > 0 ? newLines : [createEmptyLine()])
   }
+
+  // Advanced product-search popup (same as Purchase Invoice). productSearchRow is
+  // the sale line the chosen product gets applied to.
+  const [productSearchOpen, setProductSearchOpen] = useState(false)
+  const [productSearchRow, setProductSearchRow] = useState<number | null>(null)
 
   // Additional details modal states (for invoices > 50k)
   const [showAdditionalDetailsModal, setShowAdditionalDetailsModal] = useState(false)
@@ -816,7 +823,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                           className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black"
                         />
                       </div>
-                      <div className="max-h-48 overflow-y-auto">
+                      <div className="max-h-48 overflow-y-auto overflow-x-hidden">
                         {filteredCustomers.length === 0 ? (
                           <div className="px-3 py-3 text-center text-xs text-gray-500">
                             No customers found
@@ -931,16 +938,26 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                     return (
                       <tr key={index} className="border-b border-gray-300 bg-[#ebebeb]">
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <select
+                          <SearchSelectInline
+                            options={mockProducts.map((product) => ({ value: product.id, label: product.name }))}
                             value={line.selectedProduct}
-                            onChange={(e) => handleProductSelect(index, e.target.value)}
-                            className="w-full border border-gray-400 rounded p-1 bg-white text-xs"
-                          >
-                            <option value="">Select a Product</option>
-                            {mockProducts.map((product) => (
-                              <option key={product.id} value={product.id}>{product.name}</option>
-                            ))}
-                          </select>
+                            onChange={(id) => handleProductSelect(index, id)}
+                            placeholder="Select a Product"
+                            emptyText="No products found"
+                            direction="down"
+                            inputClassName="w-full border border-gray-400 rounded p-1 bg-white text-xs focus:outline-none"
+                            footerActions={[
+                              {
+                                key: 'search',
+                                label: '🔍 Search Product',
+                                className: 'text-blue-600 hover:bg-blue-50 focus:bg-blue-50',
+                                onSelect: () => {
+                                  setProductSearchRow(index)
+                                  setProductSearchOpen(true)
+                                },
+                              },
+                            ]}
+                          />
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
                           <div className="flex items-center justify-center gap-1">
@@ -1026,6 +1043,15 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         onClose={() => setShowBulkModal(false)}
         onApply={applyBulkRows}
         products={mockProducts}
+      />
+
+      <ProductSearchModal
+        open={productSearchOpen}
+        onClose={() => setProductSearchOpen(false)}
+        products={mockProducts}
+        onSelect={(product) => {
+          if (productSearchRow !== null) handleProductSelect(productSearchRow, product.id)
+        }}
       />
 
       {/* Add Customer Modal */}

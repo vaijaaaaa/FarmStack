@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronUp, Download, Filter, Printer } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import TallyStatusCell from '../components/TallyStatusCell'
+import SearchSelectInline from '../components/SearchSelectInline'
 import BulkUploadModal, { type ParsedPurchaseRow } from './purchase/BulkUploadModal'
 import { printHtml } from '@/lib/printHtml'
 
@@ -151,7 +152,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
   const [newTypeName, setNewTypeName] = useState('')
   const [newTypeGST, setNewTypeGST] = useState('')
   const [productSearch, setProductSearch] = useState({
-    location: '',
     startsWith: '',
     contains: '',
     endsWith: '',
@@ -160,20 +160,15 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     cPriceFrom: '',
     cPriceTo: '',
   })
-  
+
   // Product types for the inline "Add Product" modal — the SAME plain list the
   // Products page uses (e.g. "Fertilizers"). "Purchase of ..." is only the Tally
   // ledger, derived at sync time via toPurchaseLedger() — never the product_type,
   // so master data stays consistent across modules.
   const availableProductTypes = adminProductTypes
 
-  const productLocations = Array.from(
-    new Set(mockProducts.map((product) => product.location?.trim()).filter(Boolean) as string[]),
-  )
-
   const productSearchResults = mockProducts.filter((product) => {
     const name = product.name.toLowerCase()
-    const location = product.location?.trim() || ''
     const sellingPrice = Number(product.selling_price ?? 0)
     const tallyPrice = Number(product.tally_price ?? 0)
     const priceFrom = Number(productSearch.priceFrom || 0)
@@ -182,7 +177,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     const cPriceTo = Number(productSearch.cPriceTo || 0)
 
     return (
-      (!productSearch.location || location === productSearch.location) &&
       (!productSearch.startsWith || name.startsWith(productSearch.startsWith.toLowerCase())) &&
       (!productSearch.contains || name.includes(productSearch.contains.toLowerCase())) &&
       (!productSearch.endsWith || name.endsWith(productSearch.endsWith.toLowerCase())) &&
@@ -193,7 +187,10 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
     )
   })
 
-  const hasProductSearchFilters = Object.values(productSearch).some((value) => value.trim() !== '')
+  // True once the user has typed/selected any filter — used to reveal the results
+  // grid. The grid stays hidden on a freshly opened dialog until a filter is set
+  // or the user clicks "Get".
+  const hasProductSearchFilters = Object.values(productSearch).some((v) => v.trim() !== '')
 
   const handleUpdateItem = (index: number, field: keyof PurchaseItem, value: string) => {
     const updated = [...purchaseItems]
@@ -272,23 +269,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       expiryDate: product.expiry_date || updated[index].expiryDate,
     }
     setPurchaseItems(updated)
-  }
-
-  const handleProductSelectChange = (index: number, value: string) => {
-    if (value === 'search') {
-      setCurrentSearchIndex(index)
-      setShowSearchProductDialog(true)
-    } else if (value === 'add') {
-      setCurrentSearchIndex(index)
-      setShowAddProductModal(true)
-    } else {
-      const product = mockProducts.find((p) => p.id === value)
-      if (product) {
-        applyProductToItem(index, product)
-      } else {
-        handleUpdateItem(index, 'selectedProduct', value)
-      }
-    }
   }
 
   const closeAddProductModal = () => {
@@ -388,7 +368,6 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
 
   const clearProductSearch = () => {
     setProductSearch({
-      location: '',
       startsWith: '',
       contains: '',
       endsWith: '',
@@ -397,7 +376,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       cPriceFrom: '',
       cPriceTo: '',
     })
-    setShowProductSearchResults(false)
+    // keep the grid visible after clearing — it just shows all products again
   }
 
   // Product Type is auto-filled from the product master but stays changeable.
@@ -1030,7 +1009,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                       setShowSupplierDropdown(true)
                     }}
                     onFocus={() => setShowSupplierDropdown(true)}
-                    className="w-full rounded-md border-2 border-blue-500 px-4 py-2 text-left text-gray-700 bg-blue-50 focus:outline-none font-medium placeholder:font-normal placeholder:text-gray-400"
+                    className="w-full rounded-md border border-gray-400 px-3 py-2 text-left text-sm text-gray-800 bg-white focus:outline-none focus:border-blue-500 placeholder:text-gray-400"
                   />
                   {showSupplierDropdown && (
                     <>
@@ -1038,8 +1017,8 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                         className="fixed inset-0 z-10"
                         onClick={() => setShowSupplierDropdown(false)}
                       />
-                      <div ref={supplierDropdownRef} className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-300 rounded-md z-20 overflow-hidden">
-                        <div className="max-h-60 overflow-y-auto">
+                      <div ref={supplierDropdownRef} className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-md z-20 overflow-hidden">
+                        <div className="max-h-56 overflow-y-auto py-1">
                           {mockSuppliers
                             .filter((s) =>
                               s.name.toLowerCase().includes(supplierSearch.toLowerCase()),
@@ -1048,7 +1027,7 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                               <button
                                 key={supplier.id}
                                 onClick={() => handleSupplierSelect(supplier.id)}
-                                className="w-full text-left px-4 py-2 hover:bg-gray-100 border-b border-gray-200 last:border-b-0 focus:bg-blue-100 focus:outline-none"
+                                className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 focus:bg-blue-50 focus:text-blue-700 focus:outline-none"
                               >
                                 {supplier.name}
                               </button>
@@ -1056,18 +1035,18 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                           {mockSuppliers.filter((s) =>
                             s.name.toLowerCase().includes(supplierSearch.toLowerCase()),
                           ).length === 0 && (
-                            <p className="px-4 py-3 text-sm text-gray-500">No suppliers found</p>
+                            <p className="px-3 py-2 text-sm text-gray-400">No suppliers found</p>
                           )}
                         </div>
                         <button
                           onClick={() => handleSupplierSelect('add')}
-                          className="w-full text-left px-4 py-2 hover:bg-green-50 focus:bg-green-100 focus:outline-none font-semibold text-green-600 border-t border-gray-300"
+                          className="w-full text-left px-3 py-2 text-sm font-medium text-green-600 hover:bg-green-50 focus:bg-green-50 focus:outline-none border-t border-gray-200"
                         >
                           + Add Supplier
                         </button>
                         <button
                           onClick={() => handleSupplierSelect('search')}
-                          className="w-full text-left px-4 py-2 hover:bg-blue-50 focus:bg-blue-100 focus:outline-none font-semibold text-blue-600 border-t border-gray-300"
+                          className="w-full text-left px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 focus:bg-blue-50 focus:outline-none border-t border-gray-200"
                         >
                           🔍 Search Supplier
                         </button>
@@ -1158,18 +1137,39 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                     return (
                       <tr key={index} className="border-b border-gray-300 bg-[#ebebeb]">
                         <td className="p-2 border-r border-gray-300 align-middle">
-                          <select
+                          <SearchSelectInline
+                            options={mockProducts.map((p) => ({ value: p.id, label: p.name }))}
                             value={item.selectedProduct}
-                            onChange={(e) => handleProductSelectChange(index, e.target.value)}
-                            className="w-full border border-gray-400 rounded p-1 bg-white text-xs"
-                          >
-                            <option value="">Select a Product</option>
-                            <option value="add" className="text-green-600 font-semibold">+ Add Product</option>
-                            <option value="search" className="text-blue-600 font-semibold">Search Product</option>
-                            {mockProducts.map((p) => (
-                              <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                          </select>
+                            onChange={(id) => {
+                              const p = mockProducts.find((x) => x.id === id)
+                              if (p) applyProductToItem(index, p)
+                            }}
+                            placeholder="Select a Product"
+                            emptyText="No products found"
+                            inputClassName="w-full border border-gray-400 rounded p-1 bg-white text-xs focus:outline-none"
+                            footerActions={[
+                              {
+                                key: 'add',
+                                label: '+ Add Product',
+                                className: 'text-green-600 hover:bg-green-50 focus:bg-green-50',
+                                onSelect: () => {
+                                  setCurrentSearchIndex(index)
+                                  setShowAddProductModal(true)
+                                },
+                              },
+                              {
+                                key: 'search',
+                                label: '🔍 Search Product',
+                                className: 'text-blue-600 hover:bg-blue-50 focus:bg-blue-50',
+                                onSelect: () => {
+                                  setCurrentSearchIndex(index)
+                                  clearProductSearch()
+                                  setShowProductSearchResults(false)
+                                  setShowSearchProductDialog(true)
+                                },
+                              },
+                            ]}
+                          />
                         </td>
                         <td className="p-2 border-r border-gray-300 align-middle">
                           <input
@@ -1496,114 +1496,127 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
       {/* Search Supplier Modal */}
       {showSearchSupplierDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
-          <div className="bg-white p-8 rounded-lg w-full max-w-lg border border-gray-300">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-black">Search Supplier</h3>
+          <div className="bg-white rounded-lg w-full max-w-lg border border-gray-300 overflow-hidden">
+            <div className="flex justify-between items-center px-5 py-3 border-b border-gray-200 bg-gray-50">
+              <h3 className="text-base font-bold text-black">Search Supplier</h3>
               <button
                 onClick={closeSupplierSearch}
-                className="text-gray-500 hover:text-gray-800 font-bold text-2xl"
+                className="text-gray-400 hover:text-gray-800 text-2xl leading-none"
               >
                 &times;
               </button>
             </div>
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <label className="text-gray-700 font-medium text-sm">Name :</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-600">Starts With</span>
-                    <input
-                      type="text"
-                      value={supplierSearchForm.startsWith}
-                      onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, startsWith: e.target.value })}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
-                      placeholder="Starts with..."
-                      className="border border-gray-400 rounded px-2 py-1 w-full focus:outline-none text-sm bg-white"
-                      autoFocus
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-600">Contains</span>
-                    <input
-                      type="text"
-                      value={supplierSearchForm.contains}
-                      onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, contains: e.target.value })}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
-                      placeholder="Contains..."
-                      className="border border-gray-400 rounded px-2 py-1 w-full focus:outline-none text-sm bg-white"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-600">Ends With</span>
-                    <input
-                      type="text"
-                      value={supplierSearchForm.endsWith}
-                      onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, endsWith: e.target.value })}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
-                      placeholder="Ends with..."
-                      className="border border-gray-400 rounded px-2 py-1 w-full focus:outline-none text-sm bg-white"
-                    />
-                  </div>
-                </div>
+
+            <div className="p-5 flex flex-col gap-3">
+              {/* Name — Starts With / Contains / Ends With, all inline */}
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-bold text-gray-800 w-16 shrink-0">Name :</label>
+                <span className="text-xs text-gray-600 shrink-0">Starts With</span>
+                <input
+                  type="text"
+                  value={supplierSearchForm.startsWith}
+                  onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, startsWith: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
+                  className="border border-gray-400 rounded px-2 py-1 min-w-0 flex-1 focus:outline-none text-sm bg-white"
+                  autoFocus
+                />
+                <span className="text-xs text-gray-600 shrink-0">Contains</span>
+                <input
+                  type="text"
+                  value={supplierSearchForm.contains}
+                  onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, contains: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
+                  className="border border-gray-400 rounded px-2 py-1 min-w-0 flex-1 focus:outline-none text-sm bg-white"
+                />
+                <span className="text-xs text-gray-600 shrink-0">Ends With</span>
+                <input
+                  type="text"
+                  value={supplierSearchForm.endsWith}
+                  onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, endsWith: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
+                  className="border border-gray-400 rounded px-2 py-1 min-w-0 flex-1 focus:outline-none text-sm bg-white"
+                />
               </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium text-sm">State</label>
+
+              {/* State */}
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-700 w-16 shrink-0">State</label>
                 <input
                   type="text"
                   placeholder="State"
                   value={supplierSearchForm.state}
                   onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, state: e.target.value })}
                   onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
-                  className="w-full border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none mt-1"
+                  className="border border-gray-400 rounded px-2 py-1 flex-1 bg-white focus:outline-none text-sm"
                 />
               </div>
-              <div className="flex flex-col">
-                <label className="text-gray-700 font-medium text-sm">GSTIN</label>
+
+              {/* GSTIN */}
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-700 w-16 shrink-0">GSTIN</label>
                 <input
                   type="text"
                   placeholder="GSTIN"
                   value={supplierSearchForm.gstin}
                   onChange={(e) => setSupplierSearchForm({ ...supplierSearchForm, gstin: e.target.value })}
                   onKeyDown={(e) => e.key === 'Enter' && handleSupplierSearch()}
-                  className="w-full border border-gray-400 rounded p-2 bg-gray-50 focus:outline-none mt-1"
+                  className="border border-gray-400 rounded px-2 py-1 flex-1 bg-white focus:outline-none text-sm"
                 />
               </div>
-              <div className="flex justify-center gap-4 mt-2">
+
+              {/* Clear / Search */}
+              <div className="flex justify-end gap-2 pt-1">
                 <button
                   onClick={clearSupplierSearch}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-2 rounded-lg"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium px-6 py-1.5 rounded text-sm"
                 >
                   Clear
                 </button>
                 <button
                   onClick={handleSupplierSearch}
-                  className="bg-black hover:bg-gray-600 text-white font-medium px-6 py-2 rounded-lg"
+                  className="bg-black hover:bg-gray-800 text-white font-medium px-6 py-1.5 rounded text-sm"
                 >
                   Search
                 </button>
               </div>
 
               {supplierSearchPerformed && (
-                <div className="mt-2 border-t border-gray-200 pt-4">
-                  <p className="text-sm font-medium text-gray-700 mb-2">
+                <div className="mt-1 border-t border-gray-200 pt-3">
+                  <p className="text-xs font-medium text-gray-600 mb-2">
                     {supplierSearchResults.length} result(s) found
                   </p>
-                  <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-md divide-y divide-gray-100">
-                    {supplierSearchResults.map((supplier) => (
-                      <button
-                        key={supplier.id}
-                        onClick={() => selectSupplierFromSearch(supplier)}
-                        className="w-full text-left px-4 py-2 hover:bg-blue-50 focus:outline-none"
-                      >
-                        <span className="block font-medium text-gray-800">{supplier.name}</span>
-                        <span className="block text-xs text-gray-500">
-                          {[supplier.state, supplier.gstin].filter(Boolean).join(' • ') || 'No state / GSTIN'}
-                        </span>
-                      </button>
-                    ))}
-                    {supplierSearchResults.length === 0 && (
-                      <p className="px-4 py-3 text-sm text-gray-500">No suppliers match your search</p>
-                    )}
+                  <div className="max-h-72 overflow-auto border border-gray-200 rounded-md">
+                    <table className="w-full text-sm text-left border-collapse">
+                      <thead className="bg-gray-100 sticky top-0">
+                        <tr className="border-b border-gray-300">
+                          <th className="px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 whitespace-nowrap">Name</th>
+                          <th className="px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 whitespace-nowrap">State</th>
+                          <th className="px-3 py-2 font-semibold text-gray-700 whitespace-nowrap">GSTIN</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {supplierSearchResults.length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="px-3 py-4 text-center text-gray-500">
+                              No suppliers match your search
+                            </td>
+                          </tr>
+                        ) : (
+                          supplierSearchResults.map((supplier) => (
+                            <tr
+                              key={supplier.id}
+                              tabIndex={0}
+                              onClick={() => selectSupplierFromSearch(supplier)}
+                              className="border-b border-gray-200 hover:bg-blue-100 focus:bg-blue-100 focus:outline-none cursor-pointer"
+                            >
+                              <td className="px-3 py-1.5 border-r border-gray-200 text-gray-800">{supplier.name}</td>
+                              <td className="px-3 py-1.5 border-r border-gray-200 text-gray-700">{supplier.state || '—'}</td>
+                              <td className="px-3 py-1.5 text-gray-700">{supplier.gstin || '—'}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -1883,7 +1896,8 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
           <div className="bg-white rounded-lg border border-gray-300 w-[520px] max-w-[95vw] max-h-[88vh] flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-4 py-3 border-b border-gray-300 bg-gray-50">
               <h3 className="text-lg font-bold text-black">ProductSearch</h3>
-              <button 
+              <button
+                data-kbd-cancel
                 onClick={() => {
                   setShowSearchProductDialog(false)
                   setShowProductSearchResults(false)
@@ -1893,158 +1907,127 @@ export default function PurchaseInvoiceModule({ language }: PurchaseInvoiceModul
                 &times;
               </button>
             </div>
-            
-            <div className="p-4 flex flex-col gap-2 border-b border-gray-300 overflow-y-auto">
-              {/* Location */}
-              <div className="flex flex-col gap-1">
-                <label className="text-gray-700 font-medium text-sm">Location</label>
-                <select
-                  value={productSearch.location}
-                  onChange={(e) => setProductSearch({ ...productSearch, location: e.target.value })}
-                  className="border border-gray-400 rounded px-3 py-1.5 bg-white focus:outline-none w-full text-sm"
+
+            <div className="p-4 flex flex-col gap-3 border-b border-gray-300">
+              {/* Name — Starts With / Contains / Ends With, all inline */}
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-bold text-gray-800 w-28 shrink-0">Name :</label>
+                <span className="text-xs text-gray-600 shrink-0">Starts With</span>
+                <input
+                  type="text"
+                  autoFocus
+                  value={productSearch.startsWith}
+                  onChange={(e) => setProductSearch({ ...productSearch, startsWith: e.target.value })}
+                  className="border border-gray-400 rounded px-2 py-1 min-w-0 flex-1 focus:outline-none text-sm bg-white"
+                />
+                <span className="text-xs text-gray-600 shrink-0">Contains</span>
+                <input
+                  type="text"
+                  value={productSearch.contains}
+                  onChange={(e) => setProductSearch({ ...productSearch, contains: e.target.value })}
+                  className="border border-gray-400 rounded px-2 py-1 min-w-0 flex-1 focus:outline-none text-sm bg-white"
+                />
+                <span className="text-xs text-gray-600 shrink-0">Ends With</span>
+                <input
+                  type="text"
+                  value={productSearch.endsWith}
+                  onChange={(e) => setProductSearch({ ...productSearch, endsWith: e.target.value })}
+                  className="border border-gray-400 rounded px-2 py-1 min-w-0 flex-1 focus:outline-none text-sm bg-white"
+                />
+              </div>
+
+              {/* Price Range + Get */}
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-700 w-28 shrink-0">Price Range :</label>
+                <span className="text-xs text-gray-700 shrink-0">From</span>
+                <input
+                  type="number"
+                  value={productSearch.priceFrom}
+                  onChange={(e) => setProductSearch({ ...productSearch, priceFrom: e.target.value })}
+                  className="border border-gray-400 rounded px-2 py-1 w-24 bg-white focus:outline-none text-sm"
+                />
+                <span className="text-xs text-gray-700 shrink-0">To</span>
+                <input
+                  type="number"
+                  value={productSearch.priceTo}
+                  onChange={(e) => setProductSearch({ ...productSearch, priceTo: e.target.value })}
+                  className="border border-gray-400 rounded px-2 py-1 w-24 bg-white focus:outline-none text-sm"
+                />
+                <button
+                  onClick={() => setShowProductSearchResults(true)}
+                  className="ml-auto bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-1.5 rounded text-sm"
                 >
-                  <option value="">All Locations</option>
-                  {productLocations.map((location) => (
-                    <option key={location} value={location}>{location}</option>
-                  ))}
-                </select>
+                  Get
+                </button>
               </div>
 
-              {/* Name fields - Three inputs */}
-              <div className="flex flex-col gap-2">
-                <label className="text-gray-700 font-medium text-sm">Name :</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-600">Starts With</span>
-                    <input
-                      type="text"
-                      value={productSearch.startsWith}
-                      onChange={(e) => setProductSearch({ ...productSearch, startsWith: e.target.value })}
-                      placeholder="Starts with..."
-                      className="border border-gray-400 rounded px-2 py-1 w-full focus:outline-none text-sm bg-white"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-600">Contains</span>
-                    <input
-                      type="text"
-                      value={productSearch.contains}
-                      onChange={(e) => setProductSearch({ ...productSearch, contains: e.target.value })}
-                      placeholder="Contains..."
-                      className="border border-gray-400 rounded px-2 py-1 w-full focus:outline-none text-sm bg-white"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-600">Ends With</span>
-                    <input
-                      type="text"
-                      value={productSearch.endsWith}
-                      onChange={(e) => setProductSearch({ ...productSearch, endsWith: e.target.value })}
-                      placeholder="Ends with..."
-                      className="border border-gray-400 rounded px-2 py-1 w-full focus:outline-none text-sm bg-white"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Price Range */}
-              <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-gray-700 font-medium text-sm">Price Range :</label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-700">From</span>
-                      <input
-                        type="number"
-                        value={productSearch.priceFrom}
-                        onChange={(e) => setProductSearch({ ...productSearch, priceFrom: e.target.value })}
-                        placeholder="0"
-                        className="border border-gray-400 rounded px-2 py-1 w-16 bg-white focus:outline-none text-xs"
-                      />
-                      <span className="text-xs text-gray-700">To</span>
-                      <input
-                        type="number"
-                        value={productSearch.priceTo}
-                        onChange={(e) => setProductSearch({ ...productSearch, priceTo: e.target.value })}
-                        placeholder="0"
-                        className="border border-gray-400 rounded px-2 py-1 w-16 bg-white focus:outline-none text-xs"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-gray-700 font-medium text-sm">CPrice Range :</label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-700">From</span>
-                      <input
-                        type="number"
-                        value={productSearch.cPriceFrom}
-                        onChange={(e) => setProductSearch({ ...productSearch, cPriceFrom: e.target.value })}
-                        placeholder="0"
-                        className="border border-gray-400 rounded px-2 py-1 w-16 bg-white focus:outline-none text-xs"
-                      />
-                      <span className="text-xs text-gray-700">To</span>
-                      <input
-                        type="number"
-                        value={productSearch.cPriceTo}
-                        onChange={(e) => setProductSearch({ ...productSearch, cPriceTo: e.target.value })}
-                        placeholder="0"
-                        className="border border-gray-400 rounded px-2 py-1 w-16 bg-white focus:outline-none text-xs"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setShowProductSearchResults(true)}
-                    className="bg-green-500 hover:bg-green-600 text-white font-medium px-3 py-1 rounded text-xs"
-                  >
-                    Get
-                  </button>
-                  <button
-                    onClick={clearProductSearch}
-                    className="bg-gray-400 hover:bg-gray-500 text-white font-medium px-3 py-1 rounded text-xs"
-                  >
-                    Clear
-                  </button>
-                </div>
+              {/* CPrice Range + Clear */}
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-700 w-28 shrink-0">CPrice Range :</label>
+                <span className="text-xs text-gray-700 shrink-0">From</span>
+                <input
+                  type="number"
+                  value={productSearch.cPriceFrom}
+                  onChange={(e) => setProductSearch({ ...productSearch, cPriceFrom: e.target.value })}
+                  className="border border-gray-400 rounded px-2 py-1 w-24 bg-white focus:outline-none text-sm"
+                />
+                <span className="text-xs text-gray-700 shrink-0">To</span>
+                <input
+                  type="number"
+                  value={productSearch.cPriceTo}
+                  onChange={(e) => setProductSearch({ ...productSearch, cPriceTo: e.target.value })}
+                  className="border border-gray-400 rounded px-2 py-1 w-24 bg-white focus:outline-none text-sm"
+                />
+                <button
+                  onClick={clearProductSearch}
+                  className="ml-auto bg-gray-400 hover:bg-gray-500 text-white font-medium px-6 py-1.5 rounded text-sm"
+                >
+                  Clear
+                </button>
               </div>
             </div>
 
-            {/* Results Table - Shows when Get is clicked */}
-            {(showProductSearchResults || hasProductSearchFilters) && (
-              <div className="min-h-[220px] flex-1 overflow-auto p-0">
-                <table className="w-full text-xs text-left border-collapse">
-                  <thead className="bg-gray-100 sticky top-0">
-                    <tr className="border-b border-gray-300">
-                      <th className="px-2 py-2 font-semibold text-gray-700 border-r border-gray-300 whitespace-nowrap">Product</th>
-                      <th className="px-2 py-2 font-semibold text-gray-700 border-r border-gray-300 whitespace-nowrap">Price</th>
-                      <th className="px-2 py-2 font-semibold text-gray-700 whitespace-nowrap">CPrice</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {productSearchResults.length === 0 ? (
-                      <tr>
-                        <td colSpan={3} className="px-2 py-4 text-center text-gray-500">
-                          No products found
-                        </td>
+            {/* Results grid — shown only after the user searches (Get or a filter). */}
+            {(showProductSearchResults || hasProductSearchFilters) ? (
+              <div className="flex flex-col min-h-0 flex-1 px-4 pb-4 pt-1">
+                <p className="mb-2 text-xs font-medium text-gray-600">
+                  {productSearchResults.length} result(s) found
+                </p>
+                <div className="min-h-0 flex-1 overflow-auto border border-gray-200 rounded-md">
+                  <table className="w-full text-sm text-left border-collapse">
+                    <thead className="bg-gray-100 sticky top-0">
+                      <tr className="border-b border-gray-300">
+                        <th className="px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 whitespace-nowrap">Product</th>
+                        <th className="px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 text-right whitespace-nowrap">Price</th>
+                        <th className="px-3 py-2 font-semibold text-gray-700 text-right whitespace-nowrap">CPrice</th>
                       </tr>
-                    ) : (
-                      productSearchResults.map((product) => (
-                        <tr
-                          key={product.id}
-                          onClick={() => handleSearchProductSelect(product)}
-                          className="border-b border-gray-200 hover:bg-blue-100 cursor-pointer"
-                        >
-                          <td className="px-2 py-2 border-r border-gray-300">{product.name}</td>
-                          <td className="px-2 py-2 border-r border-gray-300 text-right">{Number(product.selling_price ?? 0)}</td>
-                          <td className="px-2 py-2 text-right">{Number(product.tally_price ?? 0)}</td>
+                    </thead>
+                    <tbody>
+                      {productSearchResults.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} className="px-3 py-4 text-center text-gray-500">
+                            No products found
+                          </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : (
+                        productSearchResults.map((product) => (
+                          <tr
+                            key={product.id}
+                            tabIndex={0}
+                            onClick={() => handleSearchProductSelect(product)}
+                            className="border-b border-gray-200 hover:bg-blue-100 focus:bg-blue-100 focus:outline-none cursor-pointer"
+                          >
+                            <td className="px-3 py-1.5 border-r border-gray-200 text-gray-800">{product.name}</td>
+                            <td className="px-3 py-1.5 border-r border-gray-200 text-right text-gray-700">{Number(product.selling_price ?? 0)}</td>
+                            <td className="px-3 py-1.5 text-right text-gray-700">{Number(product.tally_price ?? 0)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       )}
