@@ -18,29 +18,84 @@ import {
   type CreateCropPurchasesPayload,
 } from '@/src/services/api'
 
+// ── Shared stale-while-revalidate cache for list endpoints ──────────────────
+// The app is state-driven: switching modules unmounts/remounts them, so without
+// a cache every visit re-fetches from scratch and dropdowns sit empty until the
+// network round-trip finishes. These module-level maps let a remounted hook
+// render its last value INSTANTLY while it revalidates in the background, and
+// let concurrent callers of the same endpoint share ONE in-flight request.
+const listCache = new Map<string, unknown[]>()
+const listInflight = new Map<string, Promise<unknown[]>>()
+const listSubscribers = new Map<string, Set<(data: unknown[]) => void>>()
+
+// Fetch a list by key. force=false reuses an in-flight request (dedup) — used on
+// mount. force=true always starts a fresh request — used after a mutation so the
+// new row is never masked by a pre-mutation in-flight fetch.
+function loadList<T>(key: string, list: () => Promise<T[]>, force: boolean): Promise<T[]> {
+  if (!force) {
+    const existing = listInflight.get(key)
+    if (existing) return existing as Promise<T[]>
+  }
+  const p = list().then((data) => {
+    listCache.set(key, data as unknown[])
+    listSubscribers.get(key)?.forEach((fn) => fn(data as unknown[]))
+    return data
+  })
+  listInflight.set(key, p as Promise<unknown[]>)
+  void p.finally(() => {
+    if (listInflight.get(key) === (p as Promise<unknown[]>)) listInflight.delete(key)
+  })
+  return p
+}
+
+function useCachedList<T>(key: string, list: () => Promise<T[]>) {
+  const [data, setData] = useState<T[]>(() => (listCache.get(key) as T[]) ?? [])
+  // Only show a loading state on the very first ever fetch (nothing cached yet).
+  const [loading, setLoading] = useState(() => !listCache.has(key))
+  const [error, setError] = useState<string | null>(null)
+
+  const run = useCallback(
+    async (force: boolean) => {
+      if (!listCache.has(key)) setLoading(true)
+      try {
+        setData(await loadList<T>(key, list, force))
+        setError(null)
+      } catch (err) {
+        setError((err as Error).message)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [key, list],
+  )
+
+  // Mutations call this — always revalidates fresh.
+  const refresh = useCallback(() => run(true), [run])
+
+  useEffect(() => {
+    const sub = setData as unknown as (d: unknown[]) => void
+    let subs = listSubscribers.get(key)
+    if (!subs) {
+      subs = new Set()
+      listSubscribers.set(key, subs)
+    }
+    subs.add(sub)
+    // Render cached data immediately; revalidate in the background (deduped).
+    void run(false)
+    return () => {
+      subs!.delete(sub)
+    }
+  }, [key, run])
+
+  return { data, loading, error, refresh }
+}
+
 function useCollection<T, C, R = void>(
+  key: string,
   list: () => Promise<T[]>,
   create: (payload: C) => Promise<R>,
 ) {
-  const [data, setData] = useState<T[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
-      setData(await list())
-      setError(null)
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [list])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
+  const { data, loading, error, refresh } = useCachedList<T>(key, list)
 
   const add = useCallback(
     async (payload: C) => {
@@ -59,7 +114,7 @@ export function useCustomers() {
     Customer,
     Partial<Customer>,
     Customer
-  >(customerApi.list, customerApi.create)
+  >('customers', customerApi.list, customerApi.create)
   return { customers: data, loading, error, refresh, createCustomer: add }
 }
 
@@ -68,7 +123,7 @@ export function useSeasons() {
     Season,
     Partial<Season>,
     Season
-  >(seasonApi.list, seasonApi.create)
+  >('seasons', seasonApi.list, seasonApi.create)
   // Sort high → low by name (numeric-aware): 2027, 2026, 2025…
   const seasons = useMemo(
     () => [...data].sort((a, b) => (b.name || '').localeCompare(a.name || '', undefined, { numeric: true })),
@@ -86,25 +141,7 @@ export function useSeasons() {
 }
 
 export function useEntries() {
-  const [entries, setEntries] = useState<Entry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
-      setEntries(await entriesApi.list())
-      setError(null)
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
+  const { data, loading, error, refresh } = useCachedList<Entry>('entries', entriesApi.list)
 
   const createEntries = useCallback(
     async (payload: CreateEntriesPayload) => {
@@ -115,29 +152,14 @@ export function useEntries() {
     [refresh],
   )
 
-  return { entries, loading, error, refresh, createEntries }
+  return { entries: data, loading, error, refresh, createEntries }
 }
 
 export function useCropPurchases() {
-  const [cropPurchases, setCropPurchases] = useState<CropPurchase[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
-      setCropPurchases(await cropPurchaseApi.list())
-      setError(null)
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
+  const { data, loading, error, refresh } = useCachedList<CropPurchase>(
+    'crop-purchases',
+    cropPurchaseApi.list,
+  )
 
   const createCropPurchases = useCallback(
     async (payload: CreateCropPurchasesPayload) => {
@@ -148,29 +170,14 @@ export function useCropPurchases() {
     [refresh],
   )
 
-  return { cropPurchases, loading, error, refresh, createCropPurchases }
+  return { cropPurchases: data, loading, error, refresh, createCropPurchases }
 }
 
 export function useLedgers() {
-  const [ledgers, setLedgers] = useState<LedgerRecord[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
-      setLedgers(await ledgerApi.list())
-      setError(null)
-    } catch (err) {
-      setError((err as Error).message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    refresh()
-  }, [refresh])
+  const { data: ledgers, loading, error, refresh } = useCachedList<LedgerRecord>(
+    'ledgers',
+    ledgerApi.list,
+  )
 
   const createLedger = useCallback(
     async (payload: Partial<LedgerRecord>) => {
@@ -248,7 +255,7 @@ export function useSuppliers() {
     Supplier,
     Partial<Supplier>,
     Supplier
-  >(supplierApi.list, supplierApi.create)
+  >('suppliers', supplierApi.list, supplierApi.create)
   return { suppliers: data, loading, error, refresh, createSupplier: add }
 }
 
@@ -257,7 +264,7 @@ export function useProducts() {
     Product,
     Partial<Product>,
     Product
-  >(productApi.list, productApi.create)
+  >('products', productApi.list, productApi.create)
   return { products: data, loading, error, refresh, createProduct: add }
 }
 
@@ -354,7 +361,7 @@ export function useSalesInvoices() {
     SalesInvoice,
     Partial<SalesInvoice>,
     SalesInvoice
-  >(salesApi.list, salesApi.create)
+  >('sales-invoices', salesApi.list, salesApi.create)
   return { invoices: data, loading, error, refresh, createInvoice: add }
 }
 
@@ -363,6 +370,6 @@ export function usePurchaseInvoices() {
     PurchaseHistoryRow,
     unknown,
     { id: string }
-  >(purchaseApi.list, purchaseApi.create)
+  >('purchase-invoices', purchaseApi.list, purchaseApi.create)
   return { invoices: data, loading, error, refresh, createInvoice: add }
 }
