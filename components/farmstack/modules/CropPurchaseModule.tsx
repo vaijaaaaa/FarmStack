@@ -8,6 +8,7 @@ import { useCustomers, useSeasons, useCropPurchases, useLedgers } from '@/hooks/
 import SearchableSelect from './accounts/SearchableSelect'
 import { inr, fmtDate } from './accounts/data'
 import { printHtml } from '@/lib/printHtml'
+import { pattiNet, pattiBreakdown } from '@/lib/cropPatti'
 
 interface CropPurchaseModuleProps {
   language: Language
@@ -42,62 +43,20 @@ const today = () => new Date().toISOString().slice(0, 10)
 let seq = 0
 const uid = () => `crop-${Date.now()}-${seq++}`
 
-// Legacy "Patti" constants (from Accountant.exe.Config). Price is the rate per
-// ONE standard bag of BASE_WT kg — NOT per quintal.
-const BASE_WT = 75 // PattiBaseWt — value = netWeight × price / 75
-const DEFAULT_WT = 74 // PattiDefaultWt — per-bag weight used when Weight is left blank
-
-// Legacy "Patti" net-payable formula, decoded from the old app's Export logic and
-// verified cell-for-cell against the exported Excel. Lives here only.
-// The Weight entered is the GROSS scale weight (exactly like the old software).
-// It is read three ways, and the per-bag tare (Wt.Adj/Bag) is deducted on gross totals:
-//   • Weight > 75     → GROSS total: net = weight − ceil(wtAdj × bags);
-//                       value = floor(net × price / 75 + 0.1)
-//   • 0 < Weight ≤ 75 → per-bag average weight (no tare):
-//                       value = floor(bags × price × weight / 75 + 0.1)
-//   • Weight = 0      → fall back to DEFAULT_WT (74) as the per-bag weight.
-// Then: labour (Hamali) = ceil(bags × labour/bag); less = round(value × less%/100);
-//       net = value − labour − less.
-//
-// netWeight is the weight as the old Excel prints it (gross minus tare for totals;
-// the per-bag value as-is for the ≤75 case; DEFAULT_WT for blank).
-function valueFor(bags: number, weight: number, price: number, wtAdj: number): { gross: number; netWeight: number } {
-  if (weight > BASE_WT) {
-    const netWeight = weight - Math.ceil(wtAdj * bags)
-    return { gross: Math.floor((netWeight * price) / BASE_WT + 0.1), netWeight }
-  }
-  if (weight > 0) {
-    return { gross: Math.floor((bags * price * weight) / BASE_WT + 0.1), netWeight: weight }
-  }
-  return { gross: Math.floor((bags * price * DEFAULT_WT) / BASE_WT + 0.1), netWeight: DEFAULT_WT }
-}
-
+// Net payable for a live grid row — delegates to the shared formula (lib/cropPatti)
+// so the grid, the server, and the invoice all agree on the number.
 function computeNet(row: CropRow, cfg: Config): number {
-  const bags = Number(row.bags) || 0
-  const weight = Number(row.weight) || 0
-  const price = Number(row.price) || 0
-  if (bags <= 0 || price <= 0) return 0
-  const { gross } = valueFor(bags, weight, price, cfg.wtAdjPerBag)
-  const labour = Math.ceil(bags * cfg.labourPerBag)
-  const less = Math.round((gross * cfg.lessPercent) / 100)
-  return gross - labour - less
+  return pattiNet(Number(row.bags) || 0, Number(row.weight) || 0, Number(row.price) || 0, cfg)
 }
 
-// Same math as computeNet but for a stored CropPurchase, returning each part (and
-// the net weight) so the printed invoice / history can show the full breakdown.
-function breakdownFor(cp: CropPurchase): {
-  gross: number
-  less: number
-  labour: number
-  net: number
-  netWeight: number
-} {
-  const bags = Number(cp.bags) || 0
-  const price = Number(cp.price) || 0
-  const { gross, netWeight } = valueFor(bags, Number(cp.weight) || 0, price, Number(cp.wt_adj_per_bag) || 0)
-  const labour = Math.ceil(bags * (Number(cp.labour_per_bag) || 0))
-  const less = Math.round((gross * (Number(cp.less_percent) || 0)) / 100)
-  return { gross, less, labour, net: gross - labour - less, netWeight }
+// Full breakdown for a stored CropPurchase — same shared formula, using the config
+// snapshot saved on the row, so the invoice/history always match the stored net.
+function breakdownFor(cp: CropPurchase) {
+  return pattiBreakdown(Number(cp.bags) || 0, Number(cp.weight) || 0, Number(cp.price) || 0, {
+    labourPerBag: Number(cp.labour_per_bag) || 0,
+    wtAdjPerBag: Number(cp.wt_adj_per_bag) || 0,
+    lessPercent: Number(cp.less_percent) || 0,
+  })
 }
 
 export default function CropPurchaseModule({ language: _language }: CropPurchaseModuleProps) {

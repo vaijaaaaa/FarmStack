@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { query, queryOne, transaction, newId, nowIso } from '@/lib/db'
 import { ensureLedgerExists, activeSeasonForCustomer } from '@/lib/accounts'
+import { pattiNet } from '@/lib/cropPatti'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -63,6 +64,9 @@ export async function POST(request: Request) {
         const isWalkin = r.is_walkin ? 1 : 0
         const cid = String(r.customer_id ?? '').trim()
         const rSeason = String(r.season_id ?? '').trim()
+        const bags = Number(r.bags) || 0
+        const weight = Number(r.weight) || 0
+        const price = Number(r.price) || 0
         return {
           id: newId(),
           // Walk-ins never belong to a season (no ledger/account). DB rows use the
@@ -72,14 +76,21 @@ export async function POST(request: Request) {
           customer_id: isWalkin ? null : cid || null,
           customer_name: String(r.customer_name ?? '').trim(),
           is_walkin: isWalkin,
-          bags: Number(r.bags) || 0,
-          weight: Number(r.weight) || 0,
-          price: Number(r.price) || 0,
+          bags,
+          weight,
+          price,
           vehicle_number: String(r.vehicle_number ?? '').trim(),
           labour_per_bag: labourPerBag,
           wt_adj_per_bag: wtAdjPerBag,
           less_percent: lessPercent,
-          net_amount: Number(r.net_amount) || 0,
+          // AUTHORITATIVE: the server recomputes the net from the inputs with the
+          // shared Patti formula and ignores any client-sent net_amount. This is the
+          // value posted to the ledger, so the browser can never set it.
+          net_amount: pattiNet(bags, weight, price, {
+            labourPerBag,
+            wtAdjPerBag,
+            lessPercent,
+          }),
           date: String(r.date ?? '').trim(),
           created_at: createdAt,
         }
