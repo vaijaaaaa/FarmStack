@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     }
 
     const rows = await query(
-      `SELECT id, season_id, customer_id, customer_name, type, date, amount, comments, location, is_ob, created_at
+      `SELECT id, season_id, customer_id, customer_name, type, date, amount, comments, location, created_at
        FROM entries
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY created_at DESC`,
@@ -65,7 +65,6 @@ export async function POST(request: Request) {
         amount: Number(r.amount) || 0,
         comments: String(r.comments ?? '').trim(),
         location,
-        is_ob: r.is_ob ? 1 : 0,
         created_at: createdAt,
       }))
       .filter((e: { customer_id: string; amount: number }) => e.customer_id && e.amount > 0)
@@ -122,8 +121,8 @@ export async function POST(request: Request) {
       for (const e of entries) {
         run(
           `INSERT INTO entries
-            (id, season_id, customer_id, customer_name, type, date, amount, comments, location, is_ob, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, season_id, customer_id, customer_name, type, date, amount, comments, location, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             e.id,
             e.season_id,
@@ -134,7 +133,6 @@ export async function POST(request: Request) {
             e.amount,
             e.comments,
             e.location,
-            e.is_ob,
             e.created_at,
           ],
         )

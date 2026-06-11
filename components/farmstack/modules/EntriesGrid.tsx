@@ -16,7 +16,6 @@ interface GridRow {
   date: string
   amount: string
   comments: string
-  is_ob: boolean // Opening Balance carry-forward flag
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -32,10 +31,6 @@ interface EntriesGridProps {
   lockedSeasonId?: string
   // Seasons to hide from the dropdown (e.g. the customer's closed accounts).
   excludeSeasonIds?: string[]
-  // Show the O.B (Opening Balance) checkbox column — only relevant when adding
-  // entries from the Accounts ledger to carry a balance forward. Hidden on the
-  // standalone Entries page where O.B entries make no sense.
-  showOb?: boolean
   // Called after a successful save so the host can refresh.
   onAdded?: () => void
 }
@@ -45,7 +40,6 @@ export default function EntriesGrid({
   defaultSeasonId = '',
   lockedSeasonId,
   excludeSeasonIds = [],
-  showOb = false,
   onAdded,
 }: EntriesGridProps) {
   const { customers } = useCustomers()
@@ -63,7 +57,6 @@ export default function EntriesGrid({
     date: today(),
     amount: '',
     comments: '',
-    is_ob: false,
   })
 
   const [seasonId, setSeasonId] = useState(lockedSeasonId || defaultSeasonId)
@@ -215,7 +208,6 @@ export default function EntriesGrid({
             date: r.date,
             amount: Number(r.amount),
             comments: r.comments.trim(),
-            is_ob: r.is_ob ? 1 : 0,
           })),
         })
       }
@@ -302,7 +294,6 @@ export default function EntriesGrid({
               <th className="w-[28%] border-r border-gray-100 px-4 py-2.5 font-medium text-gray-500">Name</th>
               <th className="w-44 border-r border-gray-100 px-4 py-2.5 text-right font-medium text-gray-500">Amount</th>
               <th className="border-r border-gray-100 px-4 py-2.5 font-medium text-gray-500">Comments</th>
-              {showOb && <th className="w-14 border-r border-gray-100 px-2 py-2.5 text-center font-medium text-gray-500" title="Mark as Opening Balance carry-forward">O.B</th>}
               <th className="w-12 px-2 py-2.5" />
             </tr>
           </thead>
@@ -381,23 +372,6 @@ export default function EntriesGrid({
                       className="w-full rounded bg-transparent px-2 py-2 text-sm text-gray-700 placeholder-gray-300 focus:bg-white focus:outline-none focus:ring-1 focus:ring-black"
                     />
                   </td>
-                  {showOb && (
-                    <td className="border-r border-gray-100 px-2 py-1.5 text-center">
-                      <input
-                        type="checkbox"
-                        checked={r.is_ob}
-                        onChange={(e) => {
-                          updateRow(r.key, { is_ob: e.target.checked })
-                          // O.B means the customer owes from the prior season → credit type
-                          // (debit in the ledger). Auto-switch the batch type so the
-                          // direction is correct without the user having to remember.
-                          if (e.target.checked) setType('credit')
-                        }}
-                        title="Opening Balance — marks this as a carry-forward from a prior season"
-                        className="h-3.5 w-3.5 cursor-pointer accent-black"
-                      />
-                    </td>
-                  )}
                   <td className="px-2 py-1.5 text-center">
                     {rows.length > 1 && (
                       <button

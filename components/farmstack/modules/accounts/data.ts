@@ -74,18 +74,18 @@ export function buildLedgerLines(
   }
 
   // Entries: cash = he paid = credit; credit = given on credit = debit.
-  // O.B entries (is_ob = 1) get the grey badge + top pin; their direction follows
-  // the entry type: cash O.B = customer overpaid (credit), credit O.B = customer
-  // owes (debit). This lets carry-forwards represent either direction correctly.
+  // O.B entries are identified by a comment that starts with "ob" (case-insensitive).
+  // They pin to the top of the ledger. Direction still follows the entry type:
+  //   cash O.B   = customer overpaid last season → credit
+  //   credit O.B = customer still owes from last season → debit
   for (const e of entries) {
     if (e.customer_id !== ledger.customer_id || e.season_id !== ledger.season_id) continue
     const isCash = e.type === 'cash'
-    const isOB = e.is_ob === 1
+    const isOB = (e.comments ?? '').trim().toLowerCase().startsWith('ob')
     lines.push({
       id: `entry-${e.id}`,
       date: e.date || '',
       kind: isOB ? 'ob' : isCash ? 'cash' : 'credit',
-      // Direction follows entry type for both regular and O.B entries.
       drcr: isCash ? 'credit' : 'debit',
       description: isOB
         ? e.comments || 'Opening Balance'

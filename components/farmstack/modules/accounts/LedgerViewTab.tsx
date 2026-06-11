@@ -128,15 +128,12 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
   const blockedForEntry = !!ledger && !isClosed && ledger.season_id !== activeSeasonId
   const activeSeasonName = seasons.find((s) => s.id === activeSeasonId)?.name ?? ''
 
-  // Option is a CUSTOMER-facing filter, so flip it to the stored (shop) drcr.
   const visibleLines = useMemo(() => {
     if (option === 'all') return lines
-    const shopSide = option === 'debit' ? 'credit' : 'debit'
-    return lines.filter((l) => l.drcr === shopSide)
+    return lines.filter((l) => l.drcr === option)
   }, [lines, option])
 
-  // Flip a stored (shop) drcr to the customer-facing Dr/Cr tag.
-  const tag = (d: DrCr) => (d === 'debit' ? 'Cr' : 'Dr')
+  const tag = (d: DrCr) => (d === 'debit' ? 'Dr' : 'Cr')
 
   // Pure interest pass — used by Calculate (to fill the grid) and Close (fresh net).
   const computeAll = (closeStr: string) => {
@@ -333,16 +330,6 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
           )
         })()}
 
-        {ledger && closing && (
-          <Picker label="Closure Date">
-            <input
-              type="date"
-              value={closureDate}
-              onChange={(e) => setClosureDate(e.target.value)}
-              className="w-40 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-black"
-            />
-          </Picker>
-        )}
       </div>
 
       {/* ── Empty state ───────────────────────────────────────────────── */}
@@ -364,28 +351,27 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
             </div>
           )}
 
-          {/* Summary — customer perspective (Dr/Cr mirrored from the shop's books) */}
           <div className="mb-4 flex flex-wrap items-end gap-4">
-            <Stat label="Debit" value={`₹${inr(credit)}`} />
-            <Stat label="Credit" value={`₹${inr(debit)}`} />
+            <Stat label="Debit" value={`₹${inr(debit)}`} />
+            <Stat label="Credit" value={`₹${inr(credit)}`} />
             <Stat
               label="Grand Total"
-              value={`₹${inr(Math.abs(grand))} ${grand < 0 ? 'Dr' : 'Cr'}`}
-              accent={grand < 0 ? 'green' : 'default'}
+              value={`₹${inr(Math.abs(grand))} ${grand > 0 ? 'Dr' : 'Cr'}`}
+              accent={grand > 0 ? 'green' : 'default'}
             />
             {closing && calculated && (
               <>
-                <Stat label="Debit Interest" value={`₹${inr(interestSummary.credit)}`} />
-                <Stat label="Credit Interest" value={`₹${inr(interestSummary.debit)}`} />
+                <Stat label="Debit Interest" value={`₹${inr(interestSummary.debit)}`} />
+                <Stat label="Credit Interest" value={`₹${inr(interestSummary.credit)}`} />
                 <Stat
                   label="Grand Interest"
-                  value={`₹${inr(Math.abs(grandInterest))} ${grandInterest < 0 ? 'Dr' : 'Cr'}`}
-                  accent={grandInterest < 0 ? 'green' : 'default'}
+                  value={`₹${inr(Math.abs(grandInterest))} ${grandInterest > 0 ? 'Dr' : 'Cr'}`}
+                  accent={grandInterest > 0 ? 'green' : 'default'}
                 />
                 <Stat
                   label="Closing Balance"
-                  value={`₹${inr(Math.abs(netCarry))} ${netCarry < 0 ? 'Dr' : 'Cr'}`}
-                  accent={netCarry < 0 ? 'green' : 'default'}
+                  value={`₹${inr(Math.abs(netCarry))} ${netCarry > 0 ? 'Dr' : 'Cr'}`}
+                  accent={netCarry > 0 ? 'green' : 'default'}
                 />
               </>
             )}
@@ -398,20 +384,19 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                   rate-field inputs, not the bottom of their sub-note labels. */}
               <div className="flex flex-wrap items-center gap-5">
                 <span className="text-sm font-semibold text-amber-800">Accrual Interest</span>
-                {/* Customer view: Debit % = his payments, Credit % = what he owes */}
                 <RateField
                   label="Debit % / month"
-                  value={creditRate}
-                  onChange={(v) => { setCreditRate(v); setCalculated(false) }}
-                  basisValue={creditBasis}
-                  onBasisChange={(b) => { setCreditBasis(b); setCalculated(false) }}
-                />
-                <RateField
-                  label="Credit % / month"
                   value={debitRate}
                   onChange={(v) => { setDebitRate(v); setCalculated(false) }}
                   basisValue={debitBasis}
                   onBasisChange={(b) => { setDebitBasis(b); setCalculated(false) }}
+                />
+                <RateField
+                  label="Credit % / month"
+                  value={creditRate}
+                  onChange={(v) => { setCreditRate(v); setCalculated(false) }}
+                  basisValue={creditBasis}
+                  onBasisChange={(b) => { setCreditBasis(b); setCalculated(false) }}
                 />
                 <button
                   onClick={calculate}
@@ -420,13 +405,22 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                   <Calculator className="h-4 w-4" /> Calculate
                 </button>
 
-                {/* Close A/C — status badge is already always visible in the pickers row */}
+                {/* Closure Date + Close A/C — grouped together on the right */}
                 {ledger.status !== 'closed' && (
-                  <div className="ml-auto">
+                  <div className="ml-auto flex items-center gap-2">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] font-medium text-amber-700">Closure Date</span>
+                      <input
+                        type="date"
+                        value={closureDate}
+                        onChange={(e) => setClosureDate(e.target.value)}
+                        className="w-36 rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                    </div>
                     <button
                       onClick={doClose}
                       disabled={!closureDate || closing_}
-                      className="flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40"
+                      className="flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-40 self-end"
                     >
                       <Lock className="h-4 w-4" />
                       {closing_ ? 'Closing…' : 'Close A/C'}
@@ -439,7 +433,7 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                 <p className="mt-3 text-sm text-amber-900">
                   Closing balance{' '}
                   <span className="font-semibold">
-                    ₹{inr(Math.abs(netCarry))} {netCarry < 0 ? 'Dr' : 'Cr'}
+                    ₹{inr(Math.abs(netCarry))} {netCarry > 0 ? 'Dr' : 'Cr'}
                   </span>
                   <span className="text-amber-700">
                     {' '}— use Add Entry to carry it into the next season as O.B.
@@ -490,7 +484,7 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                         </td>
                         <td className="px-4 py-3 text-right">
                           <span className="font-medium text-gray-900">₹{inr(l.amount)}</span>
-                          <span className={`ml-1.5 text-[10px] font-semibold ${tag(l.drcr) === 'Dr' ? 'text-green-600' : 'text-gray-500'}`}>
+                          <span className={`ml-1.5 text-[10px] font-semibold ${tag(l.drcr) === 'Cr' ? 'text-green-600' : 'text-gray-500'}`}>
                             {tag(l.drcr)}
                           </span>
                         </td>
@@ -504,15 +498,15 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
               <tfoot>
                 <tr className="border-t border-gray-200 bg-gray-50">
                   <td colSpan={2} className="px-4 py-3 text-sm font-medium text-gray-500">
-                    Debit ₹{inr(credit)} · Credit ₹{inr(debit)}
+                    Debit ₹{inr(debit)} · Credit ₹{inr(credit)}
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-gray-900">
-                    ₹{inr(Math.abs(grand))} {grand < 0 ? 'Dr' : 'Cr'}
+                    ₹{inr(Math.abs(grand))} {grand > 0 ? 'Dr' : 'Cr'}
                   </td>
                   {closing && <td />}
                   {closing && (
                     <td className="px-4 py-3 text-right font-semibold text-gray-900">
-                      ₹{inr(Math.abs(totalInterest))} {totalInterest < 0 ? 'Dr' : 'Cr'}
+                      ₹{inr(Math.abs(totalInterest))} {totalInterest > 0 ? 'Dr' : 'Cr'}
                     </td>
                   )}
                 </tr>
@@ -536,7 +530,6 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-5">
               <EntriesGrid
-                showOb
                 lockedCustomer={{ id: ledger.customer_id, name: ledger.customer_name }}
                 // Open account → season locked to it (entries accumulate here).
                 // Closed account → pick a future season to carry the O.B into.
