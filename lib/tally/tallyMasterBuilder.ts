@@ -168,6 +168,34 @@ export function stockItemMessage(
   // and the item must declare SRCOFGSTDETAILS = "Specify Details Here" to hold
   // its own rate. Wrong tags/heads make Tally drop the STATEWISEDETAILS list
   // and the rate shows as 0%.
+  //
+  // Exempt (rate <= 0) items carry NO rate slabs. Emitting empty "Based on Value"
+  // slabs makes Tally read them as a CGST/SGST/IGST @ 0% rate and, on a voucher,
+  // expect an "Input CGST @ 0%" tax ledger — which is never created (the voucher
+  // builder and master sync both skip rate <= 0). So a 0% item with slabs fails
+  // the whole voucher with "Ledger 'Input CGST @ 0%' does not exist!".
+  const rateSlabs =
+    rate > 0
+      ? `
+          <STATEWISEDETAILS.LIST>
+            <STATENAME>&#4; Any</STATENAME>
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              <GSTRATE>${half}</GSTRATE>
+            </RATEDETAILS.LIST>
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              <GSTRATE>${half}</GSTRATE>
+            </RATEDETAILS.LIST>
+            <RATEDETAILS.LIST>
+              <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
+              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
+              <GSTRATE>${rate}</GSTRATE>
+            </RATEDETAILS.LIST>
+          </STATEWISEDETAILS.LIST>`
+      : ''
   const gstBlock = `
         <GSTDETAILS.LIST>
           <APPLICABLEFROM>20170701</APPLICABLEFROM>
@@ -177,25 +205,7 @@ export function stockItemMessage(
           <ISREVERSECHARGEAPPLICABLE>No</ISREVERSECHARGEAPPLICABLE>
           <ISNONGSTGOODS>No</ISNONGSTGOODS>
           <GSTINELIGIBLEITC>No</GSTINELIGIBLEITC>
-          <INCLUDEEXPFORSLABCALC>No</INCLUDEEXPFORSLABCALC>
-          <STATEWISEDETAILS.LIST>
-            <STATENAME>&#4; Any</STATENAME>
-            <RATEDETAILS.LIST>
-              <GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>
-              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
-              ${rate > 0 ? `<GSTRATE>${half}</GSTRATE>` : ''}
-            </RATEDETAILS.LIST>
-            <RATEDETAILS.LIST>
-              <GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>
-              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
-              ${rate > 0 ? `<GSTRATE>${half}</GSTRATE>` : ''}
-            </RATEDETAILS.LIST>
-            <RATEDETAILS.LIST>
-              <GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>
-              <GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>
-              ${rate > 0 ? `<GSTRATE>${rate}</GSTRATE>` : ''}
-            </RATEDETAILS.LIST>
-          </STATEWISEDETAILS.LIST>
+          <INCLUDEEXPFORSLABCALC>No</INCLUDEEXPFORSLABCALC>${rateSlabs}
         </GSTDETAILS.LIST>`
 
   return `<STOCKITEM NAME="${esc(name)}" ACTION="Create">

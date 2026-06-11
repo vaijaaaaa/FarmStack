@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { query, queryOne, execute, transaction, newId, nowIso } from '@/lib/db'
-import { syncSalesInvoice } from '@/lib/tally/tallySyncService'
-import { setTallyUrlForRequest } from '@/lib/tally/tallyContext'
+import { query, execute, transaction, newId, nowIso } from '@/lib/db'
+import { enqueueSalesSync } from '@/lib/tally/syncQueue'
+import { setTallyUrlForRequest, currentTallyUrl } from '@/lib/tally/tallyContext'
 import { getStockMap } from '@/lib/stock'
 import { activeSeasonForCustomer } from '@/lib/accounts'
 
@@ -55,12 +55,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'At least one item is required' }, { status: 400 })
     }
 
-    const countRow = await query<{ c: number }>('SELECT COUNT(*) AS c FROM sales_invoices')
-    const seq = (countRow[0]?.c ?? 0) + 1
-    const id = newId()
-    const invoiceNumber = `INV-${String(seq).padStart(3, '0')}`
-    const createdAt = nowIso()
-
     const builtItems = items.map((it) => ({
       id: newId(),
       product_id: String(it.product_id ?? ''),
@@ -92,22 +86,48 @@ export async function POST(request: Request) {
       }
     }
 
+    const productIds = [...new Set(builtItems.map((it) => it.product_id).filter(Boolean))]
+    const pidPh = productIds.map(() => '?').join(', ')
+
+    // All pre-save reads run in ONE parallel batch (was a serial chain of N+3
+    // round-trips): invoice count, stock map, product name/unit lookups, the
+    // Tally-eligibility check, and the customer's active season.
+    const [countRow, stock, productRows, syncedRows, seasonId] = await Promise.all([
+      query<{ c: number }>('SELECT COUNT(*) AS c FROM sales_invoices'),
+      getStockMap(),
+      productIds.length
+        ? query<{ id: string; name: string; unit: string }>(
+            `SELECT id, name, unit FROM products WHERE id IN (${pidPh})`,
+            productIds,
+          )
+        : Promise.resolve([] as { id: string; name: string; unit: string }[]),
+      productIds.length
+        ? query<{ product_id: string }>(
+            `SELECT DISTINCT pit.product_id
+             FROM purchase_items pit
+             JOIN purchase_invoices pi ON pi.id = pit.invoice_id
+             WHERE pit.product_id IN (${pidPh}) AND pi.tally_sync_status = 'synced'`,
+            productIds,
+          )
+        : Promise.resolve([] as { product_id: string }[]),
+      activeSeasonForCustomer(customerId),
+    ])
+
+    const seq = (countRow[0]?.c ?? 0) + 1
+    const id = newId()
+    const invoiceNumber = `INV-${String(seq).padStart(3, '0')}`
+    const createdAt = nowIso()
+
     // Stock check — a product can only be sold if purchase stock exists and is
-    // enough. requested quantity is summed per product across all items.
-    const stock = await getStockMap()
+    // enough. Requested quantity is summed per product across all items.
+    const productMap = new Map(productRows.map((p) => [p.id, p]))
     const requestedByProduct = new Map<string, number>()
     for (const it of builtItems) {
-      requestedByProduct.set(
-        it.product_id,
-        (requestedByProduct.get(it.product_id) || 0) + it.quantity,
-      )
+      requestedByProduct.set(it.product_id, (requestedByProduct.get(it.product_id) || 0) + it.quantity)
     }
     for (const [productId, requested] of requestedByProduct) {
       const available = stock.get(productId)?.available ?? 0
-      const prod = await queryOne<{ name: string; unit: string }>(
-        'SELECT name, unit FROM products WHERE id = ?',
-        [productId],
-      )
+      const prod = productMap.get(productId)
       const name = prod?.name || 'this product'
       const unit = prod?.unit || ''
       if (available <= 0) {
@@ -118,41 +138,23 @@ export async function POST(request: Request) {
       }
       if (requested > available) {
         return NextResponse.json(
-          {
-            error: `Insufficient stock for ${name}. Available: ${available} ${unit}, Requested: ${requested} ${unit}.`,
-          },
+          { error: `Insufficient stock for ${name}. Available: ${available} ${unit}, Requested: ${requested} ${unit}.` },
           { status: 400 },
         )
       }
     }
+
     const total = builtItems.reduce(
       (sum, it) => sum + it.quantity * it.rate * (1 + it.gst / 100),
       0,
     )
 
-    // Auto-decide Tally sync: a sale is sent to Tally only when EVERY product
-    // in it was purchased through a Tally-synced purchase (so its stock already
-    // exists in Tally). If any product was purchased with Tally sync off, that
-    // stock never reached Tally, so this sale is not Tally-relevant.
-    const productIds = [...new Set(builtItems.map((it) => it.product_id).filter(Boolean))]
-    let tallySyncEnabled = productIds.length > 0
-    for (const pid of productIds) {
-      const r = await queryOne<{ c: number }>(
-        `SELECT COUNT(*) AS c FROM purchase_items pit
-         JOIN purchase_invoices pi ON pi.id = pit.invoice_id
-         WHERE pit.product_id = ? AND pi.tally_sync_status = 'synced'`,
-        [pid],
-      )
-      if (!r || r.c === 0) {
-        tallySyncEnabled = false
-        break
-      }
-    }
+    // Auto-decide Tally sync: a sale is Tally-relevant only when EVERY product in
+    // it has a synced purchase (so its stock already exists in Tally).
+    const syncedProductIds = new Set(syncedRows.map((r) => r.product_id))
+    const tallySyncEnabled =
+      productIds.length > 0 && productIds.every((pid) => syncedProductIds.has(pid))
     const initialStatus = tallySyncEnabled ? 'pending' : 'not_synced'
-
-    // Bind this sale to the customer's currently ACTIVE (open) season ledger so
-    // it shows only in that account (not in every season). '' if they have none.
-    const seasonId = await activeSeasonForCustomer(customerId)
 
     await transaction((run) => {
       run(
@@ -200,10 +202,12 @@ export async function POST(request: Request) {
       }
     })
 
-    let tally: { status: string; message: string } | undefined
+    // Hand the Tally sync to the background queue so the save returns instantly.
+    // The invoice is already stored as `pending`; the queue updates it to
+    // synced/failed and the Sales list / Tally page reflect that on next load.
+    // Capture the per-request Tally URL now — the queue runs outside this request.
     if (tallySyncEnabled) {
-      const outcome = await syncSalesInvoice(id)
-      tally = { status: outcome.status, message: outcome.message }
+      enqueueSalesSync(id, currentTallyUrl())
     }
 
     return NextResponse.json(
@@ -222,7 +226,6 @@ export async function POST(request: Request) {
         status: body.status ?? 'saved',
         tally_sync_status: initialStatus,
         created_at: createdAt,
-        tally,
       },
       { status: 201 },
     )

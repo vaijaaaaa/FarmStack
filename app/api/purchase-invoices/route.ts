@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { query, execute, transaction, newId, nowIso } from '@/lib/db'
-import { syncPurchaseInvoice } from '@/lib/tally/tallySyncService'
-import { setTallyUrlForRequest } from '@/lib/tally/tallyContext'
+import { enqueueTallySync } from '@/lib/tally/syncQueue'
+import { setTallyUrlForRequest, currentTallyUrl } from '@/lib/tally/tallyContext'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -176,13 +176,15 @@ export async function POST(request: Request) {
       }
     })
 
-    let tally: { status: string; message: string } | undefined
+    // Hand the Tally sync to the background queue so the save returns instantly.
+    // The invoice is stored as `pending`; the queue updates it to synced/failed
+    // and the history / Tally page reflect that on the next load. Capture the
+    // per-request Tally URL now — the queue runs outside this request.
     if (tallySyncEnabled) {
-      const outcome = await syncPurchaseInvoice(id)
-      tally = { status: outcome.status, message: outcome.message }
+      enqueueTallySync('purchase', id, currentTallyUrl())
     }
 
-    return NextResponse.json({ id, total, items: builtItems, tally }, { status: 201 })
+    return NextResponse.json({ id, total, items: builtItems }, { status: 201 })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }

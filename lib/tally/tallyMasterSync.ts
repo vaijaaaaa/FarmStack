@@ -30,14 +30,17 @@ export function gstLedgerMessages(): string[] {
 }
 
 // Rate-wise GST tax ledgers (e.g. "Input CGST @ 9%") for the given GST rates,
-// so the voucher can post — and display — the rate on each tax line.
+// so the voucher can post — and display — the rate on each tax line. Rate 0 is
+// included on purpose: a 0%/exempt stock item that already exists in Tally with a
+// "Based on Value" slab makes Tally reference an "Input CGST @ 0%" ledger when the
+// voucher posts, so that ledger must exist or the whole voucher fails.
 function gstRateLedgerMessages(
   kind: 'purchase' | 'sales',
   gstRates: number[],
 ): string[] {
   const messages: string[] = []
   for (const rate of gstRates) {
-    if (!(rate > 0)) continue
+    if (rate < 0) continue
     const half = rate / 2
     if (kind === 'purchase') {
       messages.push(gstLedgerMessage(gstRateLedgerName(GST_LEDGERS.inputCgst, half), 'Central Tax'))
@@ -303,10 +306,21 @@ export async function ensureMastersForVoucher(opts: {
       messages.push(ledgerMessage(it.ledgerName, ledgerGroupForType(it.ledgerName)))
     }
   }
-  // Always ensure GST ledgers exist (idempotent) so GST vouchers never fail —
-  // both the generic ledgers and the rate-wise ones the voucher references.
+  // Always ensure GST ledgers exist (idempotent) so GST vouchers never fail.
+  //
+  // We ALWAYS include rate 0, so the "@ 0%" tax ledgers (Input/Output CGST/SGST/
+  // IGST @ 0%) exist on every sync — not just when an item is 0%. This voucher is
+  // posted in Tally "Item Invoice" mode, where Tally ALSO auto-computes GST from
+  // each stock item's OWN rate configured inside Tally. If a stock item in Tally
+  // is stale at 0% (e.g. created before its rate was set, since master Create
+  // doesn't overwrite an existing item), Tally references "Input CGST @ 0%" and
+  // the whole voucher fails with "Ledger 'Input CGST @ 0%' does not exist!". With
+  // the 0% ledgers always present, that reference resolves (₹0), the voucher
+  // posts, and the real tax is still carried by the explicit rate-wise entries the
+  // app sends — so the error can't recur regardless of stock-item config drift.
   messages.push(...gstLedgerMessages())
   const distinctRates = [
+    0,
     ...new Set(opts.items.map((it) => Number(it.gstRate || 0)).filter((r) => r > 0)),
   ]
   messages.push(...gstRateLedgerMessages(opts.kind, distinctRates))

@@ -46,7 +46,13 @@ export default function SearchSelectInline({
 }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number } | null>(null)
+  const [pos, setPos] = useState<{
+    left: number
+    width: number
+    top?: number
+    bottom?: number
+    maxHeight?: number
+  } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -71,16 +77,21 @@ export default function SearchSelectInline({
     if (!el) return
     const r = el.getBoundingClientRect()
     const spaceBelow = window.innerHeight - r.bottom
+    const spaceAbove = r.top
     // Flip the panel above the input when there isn't enough room below it —
     // unless a direction is forced.
     const flipUp =
       direction === 'up' ||
       (direction === 'auto' && spaceBelow < PANEL_MAX_H && r.top > spaceBelow)
+    // Cap the panel to the room actually available on that side (minus an 8px
+    // gutter) so it never runs off the top/bottom of the screen; the list scrolls.
+    const maxHeight = Math.max(140, (flipUp ? spaceAbove : spaceBelow) - 8)
     setPos({
       left: r.left,
       width: r.width,
       top: flipUp ? undefined : r.bottom + 4,
       bottom: flipUp ? window.innerHeight - r.top + 4 : undefined,
+      maxHeight,
     })
   }
 
@@ -171,10 +182,17 @@ export default function SearchSelectInline({
       />
       {open && pos && (
         <div
-          style={{ position: 'fixed', left: pos.left, top: pos.top, bottom: pos.bottom, width: pos.width }}
-          className="z-[100] overflow-hidden border border-gray-400 bg-white"
+          style={{
+            position: 'fixed',
+            left: pos.left,
+            top: pos.top,
+            bottom: pos.bottom,
+            width: pos.width,
+            maxHeight: pos.maxHeight,
+          }}
+          className="z-[100] flex flex-col overflow-hidden border border-gray-400 bg-white"
         >
-          <div className="max-h-56 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {filtered.map((o) => (
               <button
                 key={o.value}
@@ -199,7 +217,7 @@ export default function SearchSelectInline({
                 setOpen(false)
                 a.onSelect()
               }}
-              className={`w-full text-left px-2 py-1 text-sm font-medium border-t border-gray-300 focus:outline-none ${
+              className={`w-full shrink-0 text-left px-2 py-1 text-sm font-medium border-t border-gray-300 focus:outline-none ${
                 a.className ?? 'text-gray-800 hover:bg-blue-50 focus:bg-blue-50'
               }`}
             >

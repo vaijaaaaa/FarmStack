@@ -163,6 +163,7 @@ export function gstRateLedgerName(baseName: string, ratePercent: number): string
 }
 
 interface RateGroup {
+  rate: number // the item GST rate (e.g. 18) — used for ordering the lines
   cgstRate: number
   sgstRate: number
   igstRate: number
@@ -171,21 +172,27 @@ interface RateGroup {
   igst: number
 }
 
-// Group items' GST by their GST rate so each rate posts its own tax ledger
-// line — this is how Tally shows rate-wise GST (e.g. Input CGST @ 9% vs @ 2.5%).
-function gstByRate(items: VoucherItem[]): Map<number, RateGroup> {
-  const map = new Map<number, RateGroup>()
+// Group items' GST by rate AND supply type, so each posts its own correct tax
+// ledger line (Input CGST @ 9% vs @ 2.5%, IGST @ 18%, …).
+//
+// The key MUST include the supply type: a local item (CGST+SGST) and an
+// interstate item (IGST) at the SAME rate would otherwise merge into one group
+// whose rate labels are taken from whichever item landed first — so e.g. a local
+// item's 18% CGST gets stamped with an interstate item's "0%" CGST rate and shows
+// up as a bogus "Input CGST @ 0% ₹5,400" line. Keying by (rate|supplyType) keeps
+// each group homogeneous and every line correctly labelled.
+function gstByRate(items: VoucherItem[]): Map<string, RateGroup> {
+  const map = new Map<string, RateGroup>()
   for (const it of items) {
     const rate = Number(it.taxPercent || 0)
     if (rate <= 0) continue // exempted — no GST line
-    const b = calculateGST({
-      taxableAmount: it.baseAmount,
-      gstRate: rate,
-      gstSupplyType: it.gstSupplyType === 'interstate' ? 'interstate' : 'local',
-    })
+    const supply = it.gstSupplyType === 'interstate' ? 'interstate' : 'local'
+    const b = calculateGST({ taxableAmount: it.baseAmount, gstRate: rate, gstSupplyType: supply })
+    const key = `${rate}|${supply}`
     const g =
-      map.get(rate) ||
+      map.get(key) ||
       {
+        rate,
         cgstRate: b.cgstRate,
         sgstRate: b.sgstRate,
         igstRate: b.igstRate,
@@ -196,7 +203,7 @@ function gstByRate(items: VoucherItem[]): Map<number, RateGroup> {
     g.cgst += b.cgstAmount
     g.sgst += b.sgstAmount
     g.igst += b.igstAmount
-    map.set(rate, g)
+    map.set(key, g)
   }
   for (const g of map.values()) {
     g.cgst = round2(g.cgst)
@@ -210,15 +217,14 @@ function gstByRate(items: VoucherItem[]): Map<number, RateGroup> {
 //  Purchase: deemedPositive=true, sign=-1 (input tax debit).
 //  Sales:    deemedPositive=false, sign=+1 (output tax credit).
 function gstEntriesFromGroups(
-  groups: Map<number, RateGroup>,
+  groups: Map<string, RateGroup>,
   ledgers: { cgst: string; sgst: string; igst: string },
   deemedPositive: boolean,
   sign: 1 | -1,
 ): { xml: string; total: number } {
   let xml = ''
   let total = 0
-  for (const rate of [...groups.keys()].sort((a, b) => a - b)) {
-    const g = groups.get(rate)!
+  for (const g of [...groups.values()].sort((a, b) => a.rate - b.rate)) {
     if (g.cgst > 0) {
       xml += ledgerEntry(gstRateLedgerName(ledgers.cgst, g.cgstRate), deemedPositive, sign * g.cgst)
       total += g.cgst
@@ -249,10 +255,11 @@ function buildGstEntries(
 
 // The i-th slice (0..2) of GST groups: each duty-head amount split 40/40/20 with
 // the remainder on the 3rd slice, so the 3 slices' GST sums back EXACTLY.
-function sliceGstGroups(groups: Map<number, RateGroup>, sliceIndex: number): Map<number, RateGroup> {
-  const out = new Map<number, RateGroup>()
-  for (const [rate, g] of groups) {
-    out.set(rate, {
+function sliceGstGroups(groups: Map<string, RateGroup>, sliceIndex: number): Map<string, RateGroup> {
+  const out = new Map<string, RateGroup>()
+  for (const [key, g] of groups) {
+    out.set(key, {
+      rate: g.rate,
       cgstRate: g.cgstRate,
       sgstRate: g.sgstRate,
       igstRate: g.igstRate,

@@ -17,3 +17,10 @@ export function setTallyUrlForRequest(request: Request): void {
 export function currentTallyUrl(): string {
   return storage.getStore() || ''
 }
+
+// Run a function with an explicit Tally URL bound to its async context. Used by
+// the background sync queue, which runs OUTSIDE the original request and would
+// otherwise lose the per-request URL set via setTallyUrlForRequest.
+export function runWithTallyUrl<T>(url: string, fn: () => Promise<T>): Promise<T> {
+  return url ? storage.run(url, fn) : fn()
+}

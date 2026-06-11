@@ -102,6 +102,26 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   const { products: mockProducts } = useProducts()
   const { invoices, createInvoice, refresh } = useSalesInvoices()
   const { invoices: purchaseInvoices } = usePurchaseInvoices()
+
+  // Tally sync runs in the background after a save (status starts 'pending').
+  // While anything is still pending, poll the list so the status flips to
+  // Synced/Failed in near real time — no manual refresh. Stops once nothing is
+  // pending; a safety cap prevents endless polling if a job never resolves.
+  const syncPollRef = useRef(0)
+  useEffect(() => {
+    const hasPending = invoices.some((inv) => inv.tally_sync_status === 'pending')
+    if (!hasPending) {
+      syncPollRef.current = 0
+      return
+    }
+    if (syncPollRef.current >= 30) return // ~75s cap
+    const t = setTimeout(() => {
+      syncPollRef.current += 1
+      refresh()
+    }, 2500)
+    return () => clearTimeout(t)
+  }, [invoices, refresh])
+
   const [showNewInvoice, setShowNewInvoice] = useState(false)
   const [historyTab, setHistoryTab] = useState<'all' | 'cash' | 'credit'>('all')
   const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null)
@@ -763,7 +783,7 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   }, 0)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-72">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-black">{t('sales_invoice')}</h2>
         <div className="flex items-center gap-3">
