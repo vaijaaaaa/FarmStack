@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react'
 import { Language, UserRole } from '@/types/farmstack'
 import { getTranslation } from '@/lib/translations'
+import { useTallyAutoSync } from '@/hooks/useTallyAutoSync'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import FormKeyboardNav from './components/FormKeyboardNav'
@@ -40,6 +41,10 @@ export default function AppLayout() {
   const [role, setRole] = useState<UserRole>('user')
   const [language, setLanguage] = useState<Language>('en')
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
+
+  // App-wide: auto-push any failed/blocked invoices to Tally whenever it's
+  // reachable again (e.g. after Tally was closed during a save).
+  useTallyAutoSync()
 
   const handleRoleChange = useCallback((newRole: UserRole) => {
     setRole(newRole)
