@@ -226,15 +226,59 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
   }, [cropPurchases, seasonId])
 
   // ── Print a half-A5 (A6) crop-purchase invoice (the "Patti") ────────────────
-  const printCropInvoice = (cp: CropPurchase) => {
-    const b = breakdownFor(cp)
-    const seasonName = seasons.find((s) => s.id === cp.season_id)?.name || ''
+  // One invoice "card" body, page-broken so several can be printed in one job.
+  const invoiceBody = (d: {
+    customer_name: string
+    vehicle_number: string
+    date: string
+    bags: number
+    weight: number
+    price: number
+    seasonName: string
+    labourPerBag: number
+    wtAdjPerBag: number
+    lessPercent: number
+  }) => {
+    const b = pattiBreakdown(d.bags, d.weight, d.price, {
+      labourPerBag: d.labourPerBag,
+      wtAdjPerBag: d.wtAdjPerBag,
+      lessPercent: d.lessPercent,
+    })
     const rs = (n: number) => `₹${inr(n)}`
-    printHtml(`<!doctype html><html><head><title>Patti — ${cp.customer_name || ''}</title>
+    return `
+      <div class="invoice">
+        <div class="title">CROP PURCHASE${d.seasonName ? ' · ' + d.seasonName : ''}</div>
+        <div class="hdr">
+          <div>
+            <div class="name">${d.customer_name || '—'}</div>
+            <div class="date">Date: ${fmtDate(d.date)}</div>
+          </div>
+          <div class="veh">Vehicle No.<br><b>${d.vehicle_number || '—'}</b></div>
+        </div>
+        <hr>
+        <table>
+          <tr><td class="lbl">Bags</td><td class="r">${inr(d.bags)}</td></tr>
+          <tr><td class="lbl">Weight</td><td class="r">${inr(b.netWeight)}</td></tr>
+          <tr><td class="lbl">Rate</td><td class="r">${rs(d.price)}</td></tr>
+        </table>
+        <hr>
+        <table>
+          <tr><td class="lbl">Value</td><td class="r">${rs(b.gross)}</td></tr>
+          <tr class="ded"><td class="lbl">Less (${inr(d.lessPercent)}%)</td><td class="r">- ${inr(b.less)}</td></tr>
+          <tr class="ded"><td class="lbl">Hamali</td><td class="r">- ${inr(b.labour)}</td></tr>
+          <tr class="grand"><td>Grand Total</td><td class="r">${rs(b.net)}</td></tr>
+        </table>
+      </div>`
+  }
+
+  const wrapInvoices = (title: string, bodies: string[]) =>
+    `<!doctype html><html><head><title>${title}</title>
       <style>
         @page { size: 105mm 148mm; margin: 6mm; }
         * { box-sizing: border-box; }
         body { font-family: Arial, Helvetica, sans-serif; color:#111; margin:0; font-size:12px; }
+        .invoice { page-break-after: always; }
+        .invoice:last-child { page-break-after: auto; }
         .title { text-align:center; font-size:13px; font-weight:bold; letter-spacing:.5px; margin-bottom:6px; }
         .hdr { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
         .name { font-size:15px; font-weight:bold; }
@@ -247,29 +291,54 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
         .lbl { color:#444; }
         .grand td { font-size:14px; font-weight:bold; border-top:1px solid #000; padding-top:4px; }
         .ded td { color:#a00; }
-      </style></head><body>
-      <div class="title">CROP PURCHASE${seasonName ? ' · ' + seasonName : ''}</div>
-      <div class="hdr">
-        <div>
-          <div class="name">${cp.customer_name || '—'}</div>
-          <div class="date">Date: ${fmtDate(cp.date || cp.created_at || '')}</div>
-        </div>
-        <div class="veh">Vehicle No.<br><b>${cp.vehicle_number || '—'}</b></div>
-      </div>
-      <hr>
-      <table>
-        <tr><td class="lbl">Bags</td><td class="r">${inr(Number(cp.bags) || 0)}</td></tr>
-        <tr><td class="lbl">Weight</td><td class="r">${inr(b.netWeight)}</td></tr>
-        <tr><td class="lbl">Rate</td><td class="r">${rs(Number(cp.price) || 0)}</td></tr>
-      </table>
-      <hr>
-      <table>
-        <tr><td class="lbl">Value</td><td class="r">${rs(b.gross)}</td></tr>
-        <tr class="ded"><td class="lbl">Less (${inr(Number(cp.less_percent) || 0)}%)</td><td class="r">- ${inr(b.less)}</td></tr>
-        <tr class="ded"><td class="lbl">Hamali</td><td class="r">- ${inr(b.labour)}</td></tr>
-        <tr class="grand"><td>Grand Total</td><td class="r">${rs(b.net)}</td></tr>
-      </table>
-      </body></html>`)
+      </style></head><body>${bodies.join('')}</body></html>`
+
+  const printCropInvoice = (cp: CropPurchase) => {
+    printHtml(
+      wrapInvoices(`Patti — ${cp.customer_name || ''}`, [
+        invoiceBody({
+          customer_name: cp.customer_name,
+          vehicle_number: cp.vehicle_number,
+          date: cp.date || cp.created_at || '',
+          bags: Number(cp.bags) || 0,
+          weight: Number(cp.weight) || 0,
+          price: Number(cp.price) || 0,
+          seasonName: seasons.find((s) => s.id === cp.season_id)?.name || '',
+          labourPerBag: Number(cp.labour_per_bag) || 0,
+          wtAdjPerBag: Number(cp.wt_adj_per_bag) || 0,
+          lessPercent: Number(cp.less_percent) || 0,
+        }),
+      ]),
+    )
+  }
+
+  // Bulk-print every filled row in the grid at once — no save required. Each row
+  // becomes its own A6 page in a single print job.
+  const printAllCurrent = () => {
+    setMsg(null)
+    const valid = rows.filter(
+      (r) => (r.customer_id || (r.is_walkin && r.customer_name)) && computeNet(r, cfg) > 0,
+    )
+    if (valid.length === 0) {
+      setMsg({ kind: 'err', text: 'Add at least one row with a seller and a positive value to print.' })
+      return
+    }
+    const seasonName = seasons.find((s) => s.id === seasonId)?.name || ''
+    const bodies = valid.map((r) =>
+      invoiceBody({
+        customer_name: r.customer_name,
+        vehicle_number: r.vehicle_number,
+        date: r.date,
+        bags: Number(r.bags) || 0,
+        weight: Number(r.weight) || 0,
+        price: Number(r.price) || 0,
+        seasonName: r.is_walkin ? '' : seasonName,
+        labourPerBag: cfg.labourPerBag,
+        wtAdjPerBag: cfg.wtAdjPerBag,
+        lessPercent: cfg.lessPercent,
+      }),
+    )
+    printHtml(wrapInvoices(`Crop Purchases — ${valid.length} invoice${valid.length === 1 ? '' : 's'}`, bodies))
   }
 
   // ── Save flow ───────────────────────────────────────────────────────────────
@@ -405,6 +474,12 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
             className="flex items-center gap-1.5 rounded-md bg-black px-4 py-1.5 text-sm font-medium text-white hover:bg-gray-900 disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            onClick={printAllCurrent}
+            className="flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:border-gray-400"
+          >
+            <Printer className="h-3.5 w-3.5" /> Print All
           </button>
           <button
             onClick={clearAll}
