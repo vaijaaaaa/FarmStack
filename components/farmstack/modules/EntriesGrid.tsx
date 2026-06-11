@@ -333,10 +333,10 @@ export default function EntriesGrid({
                               closed
                                 ? 'bg-red-100 text-red-600'
                                 : active
-                                  ? 'bg-orange-100 text-orange-600'
-                                  : 'bg-green-100 text-green-700'
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-orange-100 text-orange-600'
                             }`}>
-                              {closed ? 'Closed' : active ? 'Active' : 'Open'}
+                              {closed ? 'Closed' : active ? 'Active' : 'New'}
                             </span>
                           )
                         }}

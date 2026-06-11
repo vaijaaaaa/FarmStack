@@ -97,9 +97,40 @@ export default function SearchSelectInline({
     }
   }, [open])
 
+  // After picking an option the focused option button is unmounted, so focus
+  // would fall back to <body> and break keyboard data-entry. Move it to the next
+  // field in the form instead (the cell after this dropdown).
+  const focusNextField = () => {
+    const root = rootRef.current
+    const input = inputRef.current
+    if (!root || !input) return
+    const scope = (root.closest('[data-kbd-scope], form') as HTMLElement) || document.body
+    const FOCUSABLE =
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const all = Array.from(scope.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+      (el) => el.offsetParent !== null || el.getClientRects().length > 0,
+    )
+    const idx = all.indexOf(input)
+    if (idx === -1) return
+    for (let i = idx + 1; i < all.length; i++) {
+      if (!root.contains(all[i])) {
+        all[i].focus()
+        if (
+          all[i] instanceof HTMLInputElement &&
+          /^(text|search|tel|url|email|number|password)$/.test((all[i] as HTMLInputElement).type)
+        ) {
+          ;(all[i] as HTMLInputElement).select()
+        }
+        return
+      }
+    }
+  }
+
   const choose = (v: string) => {
     onChange(v)
     setOpen(false)
+    // Defer so the panel (and its option buttons) is removed before we move focus.
+    setTimeout(focusNextField, 0)
   }
 
   return (

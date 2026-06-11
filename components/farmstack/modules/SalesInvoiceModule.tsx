@@ -593,6 +593,11 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
     }
 
     const items: Array<Record<string, unknown>> = []
+    // Running tally of quantity requested per product across ALL lines, so two
+    // lines of the same product are checked against stock together (the server
+    // sums per product too — this keeps the client in sync and avoids building an
+    // invoice that would always be rejected).
+    const requestedByProduct = new Map<string, number>()
     let total = 0
     for (let i = 0; i < activeLines.length; i++) {
       const line = activeLines[i]
@@ -617,12 +622,19 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         toast.error(`${label}: Expiry Date is required for seed products.`)
         return null
       }
-      // Stock check (batch-free): can't sell more than what's available.
+      // Stock check (batch-free): can't sell more than what's available, counting
+      // every line of the same product together.
       const avail = availableStock(line.selectedProduct)
-      if (qty > avail + 0.0001) {
-        toast.error(`Only ${avail} ${unit} available for ${name}.`)
+      const cumulative = (requestedByProduct.get(line.selectedProduct) || 0) + qty
+      if (cumulative > avail + 0.0001) {
+        toast.error(
+          cumulative > qty + 0.0001
+            ? `Only ${avail} ${unit} available for ${name} — that's less than the ${cumulative} requested across all lines.`
+            : `Only ${avail} ${unit} available for ${name}.`,
+        )
         return null
       }
+      requestedByProduct.set(line.selectedProduct, cumulative)
       const gst = productGst(line.selectedProduct)
       const price = Number(line.sellingPrice || '0')
       const latest = latestPurchaseForProduct(line.selectedProduct)
@@ -640,8 +652,9 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
         unit,
         expiry_date: line.expiryDate || '',
       })
-      // Header Total = qty × entered selling price (no GST), matches header.
-      total += qty * price
+      // Total incl. GST — matches the header preview and the value the server
+      // stores, so the >₹50k additional-details gate uses the same figure.
+      total += qty * price * (1 + gst / 100)
     }
 
     // Cash vs customer party ledger: when Tally Name is "Cash" the sale posts

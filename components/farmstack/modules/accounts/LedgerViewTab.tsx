@@ -264,11 +264,11 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                       closed
                         ? 'bg-red-100 text-red-600'
                         : active
-                          ? 'bg-orange-100 text-orange-600'
-                          : 'bg-green-100 text-green-700'
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-orange-100 text-orange-600'
                     }`}
                   >
-                    {closed ? 'Closed' : active ? 'Active' : 'Open'}
+                    {closed ? 'Closed' : active ? 'Active' : 'New'}
                   </span>
                 )
               }}
@@ -333,11 +333,11 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
           const cls = isClosed
             ? 'bg-red-100 text-red-600'
             : isActive
-              ? 'bg-orange-100 text-orange-600'
-              : 'bg-green-100 text-green-700'
+              ? 'bg-green-100 text-green-700'
+              : 'bg-orange-100 text-orange-600'
           const label = isClosed
             ? `Closed${ledger.closure_date ? ` · ${fmtDate(ledger.closure_date)}` : ''}`
-            : isActive ? 'Active' : 'Open'
+            : isActive ? 'Active' : 'New'
           return (
             <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium ${cls}`}>
               <Icon className="h-3.5 w-3.5" />
