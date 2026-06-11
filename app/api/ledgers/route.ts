@@ -50,51 +50,90 @@ export async function POST(request: Request) {
       if (!seasonId) {
         return NextResponse.json({ error: 'Please select a season' }, { status: 400 })
       }
-      let created = 0
+
+      // Pre-fetch all customer_ids already in this season — replaces N per-row dup queries.
+      const existingRows = await query<{ customer_id: string }>(
+        'SELECT customer_id FROM ledgers WHERE season_id = ?',
+        [seasonId],
+      )
+      const inSeason = new Set(existingRows.map((r) => r.customer_id))
+
+      const toInsert: Array<{
+        id: string; cid: string; customer_name: string; user_name: string;
+        description: string; acres: number; credit_limit: number; display_number: number;
+        closure_date: string;
+      }> = []
       let skipped = 0
+
       for (const row of body.customers) {
         const cid = String(row.customer_id ?? '').trim()
-        if (!cid) {
-          skipped++
-          continue
-        }
-        const dup = await queryOne<{ id: string }>(
-          'SELECT id FROM ledgers WHERE season_id = ? AND customer_id = ?',
-          [seasonId, cid],
-        )
-        if (dup) {
-          skipped++
-          continue
-        }
+        if (!cid || inSeason.has(cid)) { skipped++; continue }
+        toInsert.push({
+          id: newId(),
+          cid,
+          customer_name: String(row.customer_name ?? '').trim(),
+          user_name: String(row.user_name ?? '').trim(),
+          description: String(row.description ?? '').trim(),
+          acres: Number(row.acres) || 0,
+          credit_limit: Number(row.credit_limit) || 0,
+          display_number: Number(row.display_number) || 0,
+          closure_date: String(row.closure_date ?? '').trim(),
+        })
+      }
+
+      if (toInsert.length > 0) {
         // A customer may be attached to several seasons. Only the OLDEST still-open
         // account is "active" (receives transactions) — enforced at entry/sale time.
-        await execute(
-          `INSERT INTO ledgers
-            (id, season_id, customer_id, customer_name, user_name, description, acres, credit_limit, display_number, closure_date, opening_balance, closing_balance, carried, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            newId(),
-            seasonId,
-            cid,
-            String(row.customer_name ?? '').trim(),
-            String(row.user_name ?? '').trim(),
-            String(row.description ?? '').trim(),
-            Number(row.acres) || 0,
-            Number(row.credit_limit) || 0,
-            Number(row.display_number) || 0,
-            String(row.closure_date ?? '').trim(),
-            0,
-            0,
-            0,
-            'open',
-            nowIso(),
-          ],
+        const ts = nowIso()
+        await transaction((run) => {
+          for (const r of toInsert) {
+            run(
+              `INSERT INTO ledgers
+                (id, season_id, customer_id, customer_name, user_name, description, acres, credit_limit, display_number, closure_date, opening_balance, closing_balance, carried, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [r.id, seasonId, r.cid, r.customer_name, r.user_name, r.description, r.acres, r.credit_limit, r.display_number, r.closure_date, 0, 0, 0, 'open', ts],
+            )
+          }
+        })
+
+        // Claim orphan transactions in batch: one query to get all active seasons,
+        // then two UPDATEs per active-season group instead of 3 queries per customer.
+        const cidList = toInsert.map((r) => r.cid)
+        const ph = cidList.map(() => '?').join(', ')
+        const activeRows = await query<{ customer_id: string; season_id: string }>(
+          `SELECT l.customer_id, l.season_id
+           FROM ledgers l
+           JOIN seasons s ON s.id = l.season_id
+           WHERE l.customer_id IN (${ph}) AND l.status = 'open'
+           ORDER BY l.customer_id, s.name ASC, l.created_at ASC`,
+          cidList,
         )
-        // Adopt this customer's untagged sales/entries into their active season.
-        await claimOrphanTransactions(cid)
-        created++
+        // First row per customer (lowest season name) = their active season.
+        const activeSeason = new Map<string, string>()
+        for (const r of activeRows) {
+          if (!activeSeason.has(r.customer_id)) activeSeason.set(r.customer_id, r.season_id)
+        }
+        // Group customers by active season, then UPDATE in two queries per group.
+        const byActiveSeason = new Map<string, string[]>()
+        for (const [cid, sid] of activeSeason) {
+          const grp = byActiveSeason.get(sid) ?? []
+          grp.push(cid)
+          byActiveSeason.set(sid, grp)
+        }
+        for (const [activeSid, cids] of byActiveSeason) {
+          const cidPh = cids.map(() => '?').join(', ')
+          await execute(
+            `UPDATE sales_invoices SET season_id = ? WHERE customer_id IN (${cidPh}) AND (season_id IS NULL OR season_id = '')`,
+            [activeSid, ...cids],
+          )
+          await execute(
+            `UPDATE entries SET season_id = ? WHERE customer_id IN (${cidPh}) AND (season_id IS NULL OR season_id = '')`,
+            [activeSid, ...cids],
+          )
+        }
       }
-      return NextResponse.json({ created, skipped }, { status: 201 })
+
+      return NextResponse.json({ created: toInsert.length, skipped }, { status: 201 })
     }
 
     const customerId = String(body.customer_id ?? '').trim()
@@ -249,6 +288,12 @@ export async function PATCH(request: Request) {
         return NextResponse.json(
           { error: 'The source account does not exist in this season.' },
           { status: 404 },
+        )
+      }
+      if (source.status === 'closed') {
+        return NextResponse.json(
+          { error: `${source.customer_name || 'The source account'} is closed and cannot be moved. Reopen it first if a correction is needed.` },
+          { status: 409 },
         )
       }
 

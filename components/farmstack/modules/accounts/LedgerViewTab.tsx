@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Lock, LockOpen, Zap, X, Calculator, BookOpen } from 'lucide-react'
+import { Plus, Lock, LockOpen, Zap, X, Calculator, BookOpen, AlertTriangle } from 'lucide-react'
 import { useSalesInvoices, useEntries, useProducts, useCropPurchases } from '@/hooks/useDatabase'
 import type { LedgerRecord, Season, SalesInvoice } from '@/types/farmstack'
 import EntriesGrid from '../EntriesGrid'
@@ -77,6 +77,7 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
   const [interest, setInterest] = useState<Record<string, { interest: number; days: number }>>({})
   const [interestSummary, setInterestSummary] = useState({ debit: 0, credit: 0 })
   const [calculated, setCalculated] = useState(false)
+  const [dateWarning, setDateWarning] = useState('')
   const [closing_, setClosing_] = useState(false)
   const [showEntry, setShowEntry] = useState(false)
   const [saleDetail, setSaleDetail] = useState<SalesInvoice | null>(null)
@@ -136,11 +137,14 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
   const tag = (d: DrCr) => (d === 'debit' ? 'Dr' : 'Cr')
 
   // Pure interest pass — used by Calculate (to fill the grid) and Close (fresh net).
+  // Returns skippedCount: lines whose transaction date falls after the closure date
+  // (their interest is forced to 0 — the caller surfaces a warning for these).
   const computeAll = (closeStr: string) => {
     const close = parseLedgerDate(closeStr)
     const map: Record<string, { interest: number; days: number }> = {}
     let di = 0
     let ci = 0
+    let skippedCount = 0
     if (close) {
       const dr = Number(debitRate) || 0
       const cr = Number(creditRate) || 0
@@ -150,14 +154,19 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
         const isDebit = l.drcr === 'debit'
         const basis = isDebit ? debitBasis : creditBasis
         const rate = isDebit ? dr : cr
-        const days = Math.max(0, dayCount(from, close, basis))
-        const intr = lineInterest(l.amount, rate, days)
-        map[l.id] = { days, interest: intr }
+        const rawDays = dayCount(from, close, basis)
+        if (rawDays < 0) {
+          skippedCount++
+          map[l.id] = { days: 0, interest: 0 }
+          continue
+        }
+        const intr = lineInterest(l.amount, rate, rawDays)
+        map[l.id] = { days: rawDays, interest: intr }
         if (isDebit) di += intr
         else ci += intr
       }
     }
-    return { map, debitInterest: di, creditInterest: ci }
+    return { map, debitInterest: di, creditInterest: ci, skippedCount }
   }
 
   const calculate = () => {
@@ -165,6 +174,11 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
     setInterest(r.map)
     setInterestSummary({ debit: r.debitInterest, credit: r.creditInterest })
     setCalculated(true)
+    setDateWarning(
+      r.skippedCount > 0
+        ? `${r.skippedCount} transaction${r.skippedCount > 1 ? 's are' : ' is'} dated after the closure date — interest set to ₹0 for those lines.`
+        : '',
+    )
   }
 
   const grandInterest = interestSummary.debit - interestSummary.credit
@@ -190,24 +204,26 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
     setInterest({})
     setInterestSummary({ debit: 0, credit: 0 })
     setCalculated(false)
-    setClosureDate(today())
+    setDateWarning('')
+    // closureDate is managed by selectSeason / selectLedger, not here, so that
+    // switching accounts within a season doesn't wipe a date the user typed.
   }
 
   const selectSeason = (id: string) => {
     setSeasonId(id)
     setLedgerId('')
+    setClosureDate(today())
     resetCalc()
   }
 
-  // When an account is selected, pre-fill the closure-date picker with the date
-  // that was set at account-creation time (if any). Falls back to today so the
-  // field is never blank. Only applies while the account is still open — closed
-  // accounts already have their authoritative closure date in the DB.
+  // When an account is selected, restore its stored closure date if it has one;
+  // otherwise keep whatever closure date the user already has in the picker so
+  // batch closures on the same date don't require re-entering it every time.
   const selectLedger = (id: string) => {
     setLedgerId(id)
     resetCalc()
     const picked = ledgers.find((l) => l.id === id)
-    if (picked && picked.status !== 'closed' && picked.closure_date) {
+    if (picked?.closure_date) {
       setClosureDate(picked.closure_date)
     }
   }
@@ -373,6 +389,9 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                   value={`₹${inr(Math.abs(netCarry))} ${netCarry > 0 ? 'Dr' : 'Cr'}`}
                   accent={netCarry > 0 ? 'green' : 'default'}
                 />
+                {option !== 'all' && (
+                  <span className="self-end pb-1 text-xs text-gray-400">Totals include hidden rows</span>
+                )}
               </>
             )}
           </div>
@@ -439,6 +458,12 @@ export default function LedgerViewTab({ seasons, ledgers, onClose, onDataChanged
                     {' '}— use Add Entry to carry it into the next season as O.B.
                   </span>
                 </p>
+              )}
+              {dateWarning && (
+                <div className="mt-2 flex items-start gap-2 text-sm text-red-700">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  {dateWarning}
+                </div>
               )}
             </div>
           )}
