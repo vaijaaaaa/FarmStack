@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Plus, X } from 'lucide-react'
+import { Plus, X, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { EntryType } from '@/types/farmstack'
 import { useCustomers, useSeasons, useEntries, useLedgers } from '@/hooks/useDatabase'
@@ -65,6 +65,10 @@ export default function EntriesGrid({
   const [rows, setRows] = useState<GridRow[]>([blankRow()])
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  // Set when a NEW (non-active) account customer is picked — confirm before applying.
+  const [pickNew, setPickNew] = useState<
+    { key: string; id: string; name: string; activeSeason: string } | null
+  >(null)
 
   // A row counts as "started" once the user puts in an amount/comment (or, when
   // the customer isn't locked, a customer).
@@ -153,17 +157,14 @@ export default function EntriesGrid({
     })
   }
 
-  const pickCustomer = (key: string, id: string) => {
-    // If the customer's account in this season is closed, block the pick and
-    // show a clear error — entries to a closed account are rejected by the API
-    // anyway, but catching it here gives a friendlier message.
-    const ledger = seasonLedgers.find((l) => l.customer_id === id)
-    if (ledger?.status === 'closed') {
-      const name = customers.find((c) => c.id === id)?.name ?? 'This customer'
-      toast.error(`${name}'s account is closed — entries can't be added to a closed account.`)
-      return
-    }
-    // Stamp the row's season at pick time so it survives a later season change.
+  // The season name of a customer's ACTIVE (oldest-open) account, for the popup.
+  const activeSeasonNameForCustomer = (cid: string) => {
+    const al = ledgers.find((l) => activeLedgerIds.has(l.id) && l.customer_id === cid)
+    return al ? seasons.find((s) => s.id === al.season_id)?.name ?? '' : ''
+  }
+
+  // Stamp the row's season at pick time so it survives a later season change.
+  const applyPick = (key: string, id: string) => {
     updateRow(key, {
       seasonId: seasonId,
       customer_id: id,
@@ -171,20 +172,32 @@ export default function EntriesGrid({
     })
   }
 
-  const submit = async () => {
-    setMsg(null)
+  const pickCustomer = (key: string, id: string) => {
+    const ledger = seasonLedgers.find((l) => l.customer_id === id)
+    // Block picking a customer whose account in this season is closed.
+    if (ledger?.status === 'closed') {
+      const name = customers.find((c) => c.id === id)?.name ?? 'This customer'
+      toast.error(`${name}'s account is closed — entries can't be added to a closed account.`)
+      return
+    }
+    // Posting to a NEW (open but non-active) account → confirm before applying.
+    // (Closed already returned, so any ledger here is open.)
+    if (ledger && !activeLedgerIds.has(ledger.id)) {
+      setPickNew({
+        key,
+        id,
+        name: customers.find((c) => c.id === id)?.name ?? 'This customer',
+        activeSeason: activeSeasonNameForCustomer(id),
+      })
+      return
+    }
+    applyPick(key, id)
+  }
+
+  // Actually post the entries. `force` is true once the user has confirmed posting
+  // to a non-active (new) season account via the popup.
+  const doSubmit = async (force: boolean) => {
     const valid = rows.filter((r) => r.customer_id && Number(r.amount) > 0)
-    if (valid.length === 0) {
-      setMsg({ kind: 'err', text: 'Add at least one row with a customer and an amount.' })
-      return
-    }
-    // Every row must have a season — rows get theirs stamped when the customer is
-    // picked. Rows that somehow lost their season fall back to the header season.
-    const untagged = valid.filter((r) => !r.seasonId && !seasonId)
-    if (untagged.length > 0) {
-      setMsg({ kind: 'err', text: 'Please select a season for all rows.' })
-      return
-    }
 
     // Group by each row's own season so we can submit one batch per season,
     // allowing a single save to land entries across multiple seasons at once.
@@ -202,6 +215,7 @@ export default function EntriesGrid({
           season_id: sid,
           type,
           location,
+          force,
           rows: seasonRows.map((r) => ({
             customer_id: r.customer_id,
             customer_name: r.customer_name,
@@ -224,6 +238,31 @@ export default function EntriesGrid({
     } finally {
       setSaving(false)
     }
+  }
+
+  const submit = () => {
+    setMsg(null)
+    const valid = rows.filter((r) => r.customer_id && Number(r.amount) > 0)
+    if (valid.length === 0) {
+      setMsg({ kind: 'err', text: 'Add at least one row with a customer and an amount.' })
+      return
+    }
+    // Every row must have a season — rows get theirs stamped when the customer is
+    // picked. Rows that somehow lost their season fall back to the header season.
+    const untagged = valid.filter((r) => !r.seasonId && !seasonId)
+    if (untagged.length > 0) {
+      setMsg({ kind: 'err', text: 'Please select a season for all rows.' })
+      return
+    }
+
+    // New-account posts were already confirmed at customer-pick time (the popup),
+    // so force past the active-account gate when any row targets a non-active one.
+    const hasNew = valid.some((r) => {
+      const sid = r.seasonId || seasonId
+      const ledger = ledgers.find((l) => l.customer_id === r.customer_id && l.season_id === sid)
+      return ledger && ledger.status !== 'closed' && !activeLedgerIds.has(ledger.id)
+    })
+    doSubmit(hasNew)
   }
 
   return (
@@ -407,6 +446,49 @@ export default function EntriesGrid({
           <Plus className="h-4 w-4" /> {saving ? 'Adding…' : 'Add'}
         </button>
       </div>
+
+      {/* "Adding to a new account" — shown when a New customer is picked */}
+      {pickNew && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-red-200 bg-white">
+            <div className="flex items-center gap-2 border-b border-red-100 bg-red-50 px-5 py-4">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
+              <h3 className="text-sm font-semibold text-red-700">Adding to a new account</h3>
+            </div>
+            <div className="px-5 py-4 text-sm text-gray-600">
+              <p>
+                <span className="font-medium text-gray-800">{pickNew.name}</span> has an active
+                account in{' '}
+                <span className="font-medium text-gray-800">
+                  {pickNew.activeSeason || 'an earlier season'}
+                </span>
+                . This entry will post to{' '}
+                <span className="font-medium text-gray-800">
+                  {seasons.find((s) => s.id === seasonId)?.name || 'the selected season'}
+                </span>{' '}
+                — a new account.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-5 py-3">
+              <button
+                onClick={() => setPickNew(null)}
+                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-600 hover:border-gray-400"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={() => {
+                  applyPick(pickNew.key, pickNew.id)
+                  setPickNew(null)
+                }}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

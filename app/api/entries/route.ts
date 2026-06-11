@@ -51,6 +51,10 @@ export async function POST(request: Request) {
 
     const type = body.type === 'credit' ? 'credit' : 'cash'
     const location = String(body.location ?? '').trim()
+    // When true, the user confirmed (via the "adding to a new account" popup) that
+    // the entry should post to this season even though it isn't the customer's
+    // active (oldest-open) account.
+    const force = body.force === true
     const createdAt = nowIso()
 
     const rowsIn = Array.isArray(body.rows) ? body.rows : []
@@ -89,7 +93,7 @@ export async function POST(request: Request) {
         activeCache.set(e.customer_id, await activeSeasonForCustomer(e.customer_id))
       }
       const active = activeCache.get(e.customer_id) as string
-      if (active && active !== seasonId) {
+      if (!force && active && active !== seasonId) {
         const sn = await queryOne<{ name: string }>('SELECT name FROM seasons WHERE id = ?', [active])
         return NextResponse.json(
           {

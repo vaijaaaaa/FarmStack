@@ -56,6 +56,10 @@ export async function POST(request: Request) {
     const labourPerBag = Number(body.labour_per_bag) || 0
     const wtAdjPerBag = Number(body.wt_adj_per_bag) || 0
     const lessPercent = Number(body.less_percent) || 0
+    // When true, the user confirmed (via the "adding to a new account" popup) that
+    // a crop purchase should post to its season even though it isn't the customer's
+    // active (oldest-open) account.
+    const force = body.force === true
     const createdAt = nowIso()
 
     const rowsIn = Array.isArray(body.rows) ? body.rows : []
@@ -137,7 +141,7 @@ export async function POST(request: Request) {
         activeCache.set(cid, await activeSeasonForCustomer(cid))
       }
       const active = activeCache.get(cid) as string
-      if (active && active !== p.season_id) {
+      if (!force && active && active !== p.season_id) {
         const sn = await queryOne<{ name: string }>('SELECT name FROM seasons WHERE id = ?', [active])
         return NextResponse.json(
           {

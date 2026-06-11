@@ -67,6 +67,8 @@ export interface CreateEntriesPayload {
   type: 'cash' | 'credit'
   location: string
   rows: EntryRowPayload[]
+  // Set when the user confirms posting to a non-active (new) season account.
+  force?: boolean
 }
 
 export const entriesApi = {
@@ -102,6 +104,8 @@ export interface CreateCropPurchasesPayload {
   wt_adj_per_bag: number
   less_percent: number
   rows: CropPurchaseRowPayload[]
+  // Set when the user confirms posting to a non-active (new) season account.
+  force?: boolean
 }
 
 export const cropPurchaseApi = {

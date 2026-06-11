@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Plus, X, Trash2, Printer, Eye } from 'lucide-react'
+import { Plus, X, Trash2, Printer, Eye, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Language, CropPurchase } from '@/types/farmstack'
 import { useCustomers, useSeasons, useCropPurchases, useLedgers } from '@/hooks/useDatabase'
@@ -76,7 +76,14 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
   const [confirm, setConfirm] = useState<{
     ledger: { name: string; net: number }[]
     walkin: { name: string; net: number }[]
+    // Customers being posted to a NEW (non-active) season account — shown as a
+    // warning in the confirmation modal.
+    newAccounts: { name: string; activeSeason: string }[]
   } | null>(null)
+  // Set when a NEW (non-active) account seller is picked — confirm before applying.
+  const [pickNew, setPickNew] = useState<
+    { key: string; id: string; name: string; activeSeason: string } | null
+  >(null)
 
   const cfg: Config = {
     labourPerBag: Number(labourPerBag) || 0,
@@ -163,20 +170,37 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
     setRows((prev) => normalizeRows(prev.filter((r) => r.key !== key)))
   }
 
-  const pickCustomer = (key: string, id: string) => {
-    // Block sellers whose account in this season is closed.
-    const ledger = seasonLedgers.find((l) => l.customer_id === id)
-    if (ledger?.status === 'closed') {
-      const name = customers.find((c) => c.id === id)?.name ?? 'This customer'
-      toast.error(`${name}'s account is closed — crop can't be posted to a closed account.`)
-      return
-    }
+  const applyPick = (key: string, id: string) => {
     updateRow(key, {
       seasonId,
       customer_id: id,
       customer_name: customers.find((c) => c.id === id)?.name ?? '',
       is_walkin: false,
     })
+  }
+
+  const pickCustomer = (key: string, id: string) => {
+    const ledger = seasonLedgers.find((l) => l.customer_id === id)
+    // Block sellers whose account in this season is closed.
+    if (ledger?.status === 'closed') {
+      const name = customers.find((c) => c.id === id)?.name ?? 'This customer'
+      toast.error(`${name}'s account is closed — crop can't be posted to a closed account.`)
+      return
+    }
+    // Posting to a NEW (open but non-active) account → confirm before applying.
+    // (Closed accounts already returned above, so any ledger here is open.)
+    const isNew = ledger && !activeLedgerIds.has(ledger.id)
+    if (isNew) {
+      const al = ledgers.find((l) => activeLedgerIds.has(l.id) && l.customer_id === id)
+      setPickNew({
+        key,
+        id,
+        name: customers.find((c) => c.id === id)?.name ?? 'This customer',
+        activeSeason: al ? seasons.find((s) => s.id === al.season_id)?.name ?? '' : '',
+      })
+      return
+    }
+    applyPick(key, id)
   }
 
   // Typed (walk-in) row: free text sets the name; never touches a ledger.
@@ -264,6 +288,23 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
       setMsg({ kind: 'err', text: 'Please select a season for the selected customers.' })
       return
     }
+    // Customers whose (customer, season) ledger is open but NOT their active
+    // (oldest-open) account — posting here means a new-account post.
+    const seen = new Set<string>()
+    const newAccounts: { name: string; activeSeason: string }[] = []
+    for (const r of valid) {
+      if (!r.customer_id || seen.has(r.customer_id)) continue
+      const ledger = seasonLedgers.find((l) => l.customer_id === r.customer_id)
+      if (ledger && ledger.status !== 'closed' && !activeLedgerIds.has(ledger.id)) {
+        seen.add(r.customer_id)
+        const al = ledgers.find((l) => activeLedgerIds.has(l.id) && l.customer_id === r.customer_id)
+        newAccounts.push({
+          name: r.customer_name,
+          activeSeason: al ? seasons.find((s) => s.id === al.season_id)?.name ?? '' : '',
+        })
+      }
+    }
+
     setConfirm({
       ledger: valid
         .filter((r) => r.customer_id)
@@ -271,10 +312,13 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
       walkin: valid
         .filter((r) => r.is_walkin)
         .map((r) => ({ name: r.customer_name, net: computeNet(r, cfg) })),
+      newAccounts,
     })
   }
 
   const doSave = async () => {
+    // Only force past the active-account gate when the user confirmed new-account posts.
+    const force = (confirm?.newAccounts.length ?? 0) > 0
     setConfirm(null)
     const valid = rows.filter(
       (r) => (r.customer_id || (r.is_walkin && r.customer_name)) && computeNet(r, cfg) > 0,
@@ -289,6 +333,7 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
         labour_per_bag: cfg.labourPerBag,
         wt_adj_per_bag: cfg.wtAdjPerBag,
         less_percent: cfg.lessPercent,
+        force,
         rows: valid.map((r) => ({
           season_id: r.is_walkin ? null : r.seasonId || seasonId || null,
           customer_id: r.customer_id,
@@ -606,6 +651,49 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
         </div>
       )}
 
+      {/* ── "Adding to a new account" — shown when a New seller is picked ── */}
+      {pickNew && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-red-200 bg-white">
+            <div className="flex items-center gap-2 border-b border-red-100 bg-red-50 px-5 py-4">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
+              <h3 className="text-sm font-semibold text-red-700">Adding to a new account</h3>
+            </div>
+            <div className="px-5 py-4 text-sm text-gray-600">
+              <p>
+                <span className="font-medium text-gray-800">{pickNew.name}</span> has an active
+                account in{' '}
+                <span className="font-medium text-gray-800">
+                  {pickNew.activeSeason || 'an earlier season'}
+                </span>
+                . This crop purchase will post to{' '}
+                <span className="font-medium text-gray-800">
+                  {seasons.find((s) => s.id === seasonId)?.name || 'the selected season'}
+                </span>{' '}
+                — a new account.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-5 py-3">
+              <button
+                onClick={() => setPickNew(null)}
+                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-600 hover:border-gray-400"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={() => {
+                  applyPick(pickNew.key, pickNew.id)
+                  setPickNew(null)
+                }}
+                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Confirmation modal ──────────────────────────────────────────── */}
       {confirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
@@ -617,6 +705,22 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
               </button>
             </div>
             <div className="max-h-80 space-y-4 overflow-auto px-5 py-4 text-sm">
+              {confirm.newAccounts.length > 0 && (
+                <div className="rounded-md border border-orange-200 bg-orange-50 px-3 py-2">
+                  <p className="mb-1 text-xs font-semibold uppercase text-orange-700">
+                    Adding to a new account
+                  </p>
+                  <ul className="space-y-1">
+                    {confirm.newAccounts.map((x, idx) => (
+                      <li key={idx} className="text-xs text-orange-800">
+                        <span className="font-medium">{x.name}</span> has an active account in{' '}
+                        <span className="font-medium">{x.activeSeason || 'an earlier season'}</span>{' '}
+                        — this posts to the new season instead.
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {confirm.ledger.length > 0 && (
                 <div>
                   <p className="mb-1.5 text-xs font-semibold uppercase text-green-700">
