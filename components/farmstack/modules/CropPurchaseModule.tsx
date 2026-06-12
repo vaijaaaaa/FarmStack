@@ -515,7 +515,7 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
                 Weight
               </th>
               <th className="w-28 border-r border-gray-400 px-3 py-2.5 text-right font-medium text-gray-500">Price</th>
-              <th className="w-32 border-r border-gray-400 px-3 py-2.5 text-right font-medium text-gray-500">Net</th>
+              <th className="w-32 border-r border-gray-400 px-3 py-2.5 text-right font-medium text-gray-500">Total</th>
               <th className="border-r border-gray-400 px-3 py-2.5 font-medium text-gray-500">Vehicle No.</th>
               <th className="w-10 px-2 py-2.5" />
             </tr>
@@ -679,7 +679,7 @@ export default function CropPurchaseModule({ language: _language }: CropPurchase
                       <th className="px-4 py-2.5 text-right font-medium">Bags</th>
                       <th className="px-4 py-2.5 text-right font-medium">Weight</th>
                       <th className="px-4 py-2.5 text-right font-medium">Price</th>
-                      <th className="px-4 py-2.5 text-right font-medium">Net</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Total</th>
                       <th className="px-4 py-2.5 font-medium">Vehicle</th>
                       <th className="px-4 py-2.5 text-center font-medium">Print</th>
                     </tr>
