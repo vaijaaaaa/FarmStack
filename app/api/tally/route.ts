@@ -11,6 +11,9 @@ import {
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// Manual "Retry Sync" / "Sync to Tally" can post several vouchers in one call.
+// Give it time to finish. Vercel default ~10s.
+export const maxDuration = 60
 
 const MASTER_KINDS: MasterKind[] = ['supplier', 'customer', 'product', 'product_type']
 

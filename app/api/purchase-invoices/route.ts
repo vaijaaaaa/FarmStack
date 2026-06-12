@@ -5,6 +5,8 @@ import { setTallyUrlForRequest, currentTallyUrl, runWithTallyUrl } from '@/lib/t
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// Give the background Tally sync (after()) time to finish. Vercel default ~10s.
+export const maxDuration = 60
 
 interface PurchaseItemInput {
   product_id?: string

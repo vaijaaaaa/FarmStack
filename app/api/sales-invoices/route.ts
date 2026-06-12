@@ -7,6 +7,9 @@ import { activeSeasonForCustomer } from '@/lib/accounts'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// Give the background Tally sync (after()) time to finish a large invoice — a sale
+// can fan out to syncing several prerequisite purchases first. Vercel default ~10s.
+export const maxDuration = 60
 
 interface SalesItemInput {
   product_id: string
