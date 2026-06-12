@@ -198,12 +198,12 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
   if (!isOpen) return null
 
   const inputClass =
-    'w-full rounded border border-gray-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-black'
+    'w-full min-w-[110px] rounded border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-black'
   const duplicateCount = preview.filter((r, i) => duplicateReason(r, i)).length
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-lg bg-white p-6">
+      <div className="max-h-[92vh] w-full max-w-[95vw] overflow-y-auto rounded-lg bg-white p-6">
         <h2 className="mb-4 text-2xl font-bold text-black">Bulk Upload Customers</h2>
 
         <a
@@ -234,22 +234,22 @@ export default function BulkUploadModal({ language, isOpen, onClose, onSuccess }
                 </span>
               )}
             </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="w-full min-w-[1300px] border-collapse text-sm">
                 <thead>
                   <tr className="bg-gray-50">
-                    <th className="border border-gray-200 px-3 py-2 text-left">Name</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Phone</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Aadhar Card</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Address (City)</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">State</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Country</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">GSTIN</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Acres</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Loyalty</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Referral</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Display Number</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Action</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Name</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Phone</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Aadhar Card</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Address (City)</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">State</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Country</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">GSTIN</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Acres</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Loyalty</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Referral</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Display Number</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left whitespace-nowrap">Action</th>
                   </tr>
                 </thead>
                 <tbody>
