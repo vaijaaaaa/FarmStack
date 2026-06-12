@@ -177,6 +177,8 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   // the sale line the chosen product gets applied to.
   const [productSearchOpen, setProductSearchOpen] = useState(false)
   const [productSearchRow, setProductSearchRow] = useState<number | null>(null)
+  // Guards the Sale button against double-submit (duplicate invoice / Tally post).
+  const [isSavingSale, setIsSavingSale] = useState(false)
 
   // Additional details modal states (for invoices > 50k)
   const [showAdditionalDetailsModal, setShowAdditionalDetailsModal] = useState(false)
@@ -696,31 +698,26 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
   }
 
   const submit = async (payload: Record<string, unknown>) => {
+    // Guard against a double-click / Enter-repeat creating two identical sales
+    // (double stock decrement + duplicate Tally voucher).
+    if (isSavingSale) return
+    setIsSavingSale(true)
     const toastId = toast.loading('Saving sale…')
     try {
-      const result: any = await createInvoice(payload as never)
+      await createInvoice(payload as never)
       setShowNewInvoice(false)
       setSaleLines([createEmptyLine()])
       setSelectedCustomerId('')
       setSelectedTallyName('Cash')
       setNarration('')
       setDate(todayISO())
-      // Tally sync happens automatically for products that were purchased with
-      // Tally sync on; result.tally is present only when a sync was attempted.
-      if (result?.tally) {
-        if (result.tally.status === 'synced') {
-          toast.success('Sale saved and synced to Tally successfully!', { id: toastId })
-        } else {
-          toast.error(`Tally sync ${result.tally.status} — sale saved locally`, {
-            id: toastId,
-            description: result.tally.message,
-          })
-        }
-      } else {
-        toast.success('Sale Invoice saved successfully!', { id: toastId })
-      }
+      // Tally sync now runs in the background after save, so the row saves as
+      // "Pending" and the status flips to Synced/Failed on its own.
+      toast.success('Sale Invoice saved — syncing to Tally…', { id: toastId })
     } catch (err) {
       toast.error(`Failed to save invoice: ${(err as Error).message}`, { id: toastId })
+    } finally {
+      setIsSavingSale(false)
     }
   }
 
@@ -1054,10 +1051,11 @@ export default function SalesInvoiceModule({ language }: SalesInvoiceModuleProps
                 </button>
                 <button
                   onClick={handleSaveInvoice}
+                  disabled={isSavingSale}
                   data-kbd-submit
-                  className="bg-[#6b66fc] hover:bg-[#5b56dc] text-white font-medium px-8 py-2 rounded-lg text-lg min-w-30"
+                  className="bg-[#6b66fc] hover:bg-[#5b56dc] text-white font-medium px-8 py-2 rounded-lg text-lg min-w-30 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Sale
+                  {isSavingSale ? 'Saving…' : 'Sale'}
                 </button>
               </div>
               <button

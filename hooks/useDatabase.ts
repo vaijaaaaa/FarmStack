@@ -27,6 +27,10 @@ import {
 const listCache = new Map<string, unknown[]>()
 const listInflight = new Map<string, Promise<unknown[]>>()
 const listSubscribers = new Map<string, Set<(data: unknown[]) => void>>()
+// Monotonic per-key fetch sequence. Only the latest-started fetch is allowed to
+// write the cache, so a slow stale (pre-mutation) response can never clobber the
+// fresh data from a later refresh (e.g. the row you just saved flickering away).
+const listSeq = new Map<string, number>()
 
 // Fetch a list by key. force=false reuses an in-flight request (dedup) — used on
 // mount. force=true always starts a fresh request — used after a mutation so the
@@ -36,9 +40,15 @@ function loadList<T>(key: string, list: () => Promise<T[]>, force: boolean): Pro
     const existing = listInflight.get(key)
     if (existing) return existing as Promise<T[]>
   }
+  const seq = (listSeq.get(key) ?? 0) + 1
+  listSeq.set(key, seq)
   const p = list().then((data) => {
-    listCache.set(key, data as unknown[])
-    listSubscribers.get(key)?.forEach((fn) => fn(data as unknown[]))
+    // Apply only if no newer fetch for this key has started since — otherwise this
+    // response is stale and must not overwrite fresher cache/subscribers.
+    if (listSeq.get(key) === seq) {
+      listCache.set(key, data as unknown[])
+      listSubscribers.get(key)?.forEach((fn) => fn(data as unknown[]))
+    }
     return data
   })
   listInflight.set(key, p as Promise<unknown[]>)
@@ -58,7 +68,10 @@ function useCachedList<T>(key: string, list: () => Promise<T[]>) {
     async (force: boolean) => {
       if (!listCache.has(key)) setLoading(true)
       try {
-        setData(await loadList<T>(key, list, force))
+        // Don't setData from the returned value directly — a stale fetch resolves
+        // with stale data. Let the seq-gated subscriber notification update state,
+        // so only the latest fetch ever writes it.
+        await loadList<T>(key, list, force)
         setError(null)
       } catch (err) {
         setError((err as Error).message)

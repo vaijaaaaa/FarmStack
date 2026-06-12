@@ -108,6 +108,17 @@ export async function syncPurchaseInvoice(id: string): Promise<SyncOutcome> {
   )
   if (!inv) return { status: 'failed', message: 'Purchase invoice not found' }
 
+  // Idempotency: never re-post a voucher that is already in Tally. Without this,
+  // a second sync (Retry button, the auto-retry, or a sale re-driving its
+  // purchases) would create a DUPLICATE voucher every time.
+  if (String(inv.tally_sync_status) === 'synced' && inv.tally_voucher_id) {
+    return {
+      status: 'synced',
+      message: 'Already synced to Tally',
+      voucherId: String(inv.tally_voucher_id),
+    }
+  }
+
   const items = await query<Record<string, any>>(
     'SELECT * FROM purchase_items WHERE invoice_id = ?',
     [id],
@@ -255,6 +266,15 @@ export async function syncSalesInvoice(id: string): Promise<SyncOutcome> {
     [id],
   )
   if (!inv) return { status: 'failed', message: 'Sales invoice not found' }
+
+  // Idempotency: never re-post a voucher that is already in Tally (see purchase).
+  if (String(inv.tally_sync_status) === 'synced' && inv.tally_voucher_id) {
+    return {
+      status: 'synced',
+      message: 'Already synced to Tally',
+      voucherId: String(inv.tally_voucher_id),
+    }
+  }
 
   const items = await query<Record<string, any>>(
     'SELECT * FROM sales_items WHERE invoice_id = ?',

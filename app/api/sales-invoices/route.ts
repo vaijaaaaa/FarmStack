@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { query, execute, transaction, newId, nowIso } from '@/lib/db'
-import { enqueueSalesSync } from '@/lib/tally/syncQueue'
-import { setTallyUrlForRequest, currentTallyUrl } from '@/lib/tally/tallyContext'
+import { syncSalesInvoice } from '@/lib/tally/tallySyncService'
+import { setTallyUrlForRequest, currentTallyUrl, runWithTallyUrl } from '@/lib/tally/tallyContext'
 import { getStockMap } from '@/lib/stock'
 import { activeSeasonForCustomer } from '@/lib/accounts'
 
@@ -204,10 +204,13 @@ export async function POST(request: Request) {
 
     // Hand the Tally sync to the background queue so the save returns instantly.
     // The invoice is already stored as `pending`; the queue updates it to
-    // synced/failed and the Sales list / Tally page reflect that on next load.
-    // Capture the per-request Tally URL now — the queue runs outside this request.
+    // Push to Tally AFTER the response is sent, so the save stays instant. `after`
+    // is Vercel-safe: it uses waitUntil to keep the serverless function alive until
+    // the sync finishes (the old in-memory queue silently never ran on Vercel).
+    // Capture the per-request Tally URL now — the callback runs outside the request.
     if (tallySyncEnabled) {
-      enqueueSalesSync(id, currentTallyUrl())
+      const tallyUrl = currentTallyUrl()
+      after(() => runWithTallyUrl(tallyUrl, () => syncSalesInvoice(id)).catch(() => {}))
     }
 
     return NextResponse.json(

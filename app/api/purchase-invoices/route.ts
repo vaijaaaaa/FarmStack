@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { query, execute, transaction, newId, nowIso } from '@/lib/db'
-import { enqueueTallySync } from '@/lib/tally/syncQueue'
-import { setTallyUrlForRequest, currentTallyUrl } from '@/lib/tally/tallyContext'
+import { syncPurchaseInvoice } from '@/lib/tally/tallySyncService'
+import { setTallyUrlForRequest, currentTallyUrl, runWithTallyUrl } from '@/lib/tally/tallyContext'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -178,10 +178,12 @@ export async function POST(request: Request) {
 
     // Hand the Tally sync to the background queue so the save returns instantly.
     // The invoice is stored as `pending`; the queue updates it to synced/failed
-    // and the history / Tally page reflect that on the next load. Capture the
-    // per-request Tally URL now — the queue runs outside this request.
+    // Push to Tally AFTER the response is sent (instant save), Vercel-safe via
+    // `after`/waitUntil. Capture the per-request Tally URL now — the callback runs
+    // outside the request.
     if (tallySyncEnabled) {
-      enqueueTallySync('purchase', id, currentTallyUrl())
+      const tallyUrl = currentTallyUrl()
+      after(() => runWithTallyUrl(tallyUrl, () => syncPurchaseInvoice(id)).catch(() => {}))
     }
 
     return NextResponse.json({ id, total, items: builtItems }, { status: 201 })
